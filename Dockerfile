@@ -98,7 +98,14 @@ RUN apt install libgl1-mesa-glx -y
 RUN pip install itkwidgets
 RUN pip install tensorflow-gpu==1.14.0
 #add the cgal scripts
-#EXPOSE 9774
+
+WORKDIR /usr/local/featureExtractionParty/dashdataframe/DashDataFrame
+RUN pip install .
+WORKDIR /usr/local/featureExtractionParty/phenograph/PhenoGraph
+RUN pip install .
+
+
+
 #RUN mkdir -p /scripts
 #ADD ./jupyter/run_jupyter.sh /scripts/
 #ADD ./jupyter/jupyter_notebook_config.py /root/.jupyter/
@@ -106,3 +113,4 @@ RUN pip install tensorflow-gpu==1.14.0
 #RUN chmod -R a+x /scripts
 #ENTRYPOINT ["/scripts/run_jupyter.sh"]
 
+EXPOSE 8050
