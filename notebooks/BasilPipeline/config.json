@@ -1,0 +1,24 @@
+{
+  "dataset_name" : "basil",
+  "data_version" : 1,
+  "sqlalchemy_database_uri":"postgresql://postgres:synapsedb@ibs-forrestc-ux1/postgres",
+  "cgal_number_of_rays" :5,
+  "cgal_number_of_clusters" : 5,
+  "cgal_smoothing_lambda" : 0.3,
+   "cgal_cone_angle": 0.7853981633974483, 
+  "local_dist_thresh" : 3500,
+    "pointnet_model_path": "/usr/local/featureExtractionParty/external/pointnet_spine_ae/log_model_manually_selected_trainingset_40_aligned/best_model_epoch_009.ckpt",
+  "pointnet_batch_size" : 1,
+  "pointnet_num_points": 2048,
+   "pointnet_GPU_INDEX": 0,
+   "pointnet_dump_dir" : "dump",
+   "input_cell_db": "/allen/programs/celltypes/workgroups/em-connectomics/analysis_group/basil/analysis_dataframe/neurons_phenograph_cluster.pkl",
+    "pss_directory": "/allen/programs/celltypes/workgroups/em-connectomics/analysis_group/segmentation/synapse_based/testEXPT1/",
+    "pss_dataframe_directory":"/allen/programs/celltypes/workgroups/em-connectomics/analysis_group/basil/PSS/classification/synapses_PSS/",
+    "cv_path":"https://storage.googleapis.com/neuroglancer/basil_v0/basil_full/seg-aug",
+    "service_endpoint":"http://35.237.202.194/meshing/",
+    "cluster_center_dictionary": "../Dictionary/cluster_centers_V3_30binsmanualordered.pkl",
+    "sholl_params": [15000,250000,15000],
+    "pss_2d_umap_reducer_file": "/usr/local/featureExtractionParty/models/pss_dictionary/umap_dictionary_oct2020.pkl"
+    
+}
