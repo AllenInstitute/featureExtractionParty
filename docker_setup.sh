@@ -12,7 +12,7 @@ nvidia-docker run -d --name sharmi_fep \
 -v /allen:/allen \
 -v /tmp/.X11-unix:/tmp/.X11-unix:ro \
 -p 9778:9778 \
--p 0.0.0.0:6008:6008 \
+-p 0.0.0.0:8050:8050 \
 -e "PASSWORD=$JUPYTERPASSWORD" \
 -e DISPLAY \
 --privileged \
