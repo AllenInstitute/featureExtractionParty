@@ -1,0 +1,15 @@
+{
+    "cluster_center_dictionary": "../Dictionary/cluster_centers_V3_30binsmanualordered.pkl",
+    "normalize_by_surfacearea" = True,
+    "factor" = 10000000000,
+    "soma_weight" = 1,
+    "depth_weight" = 1,
+    "pss_weight" = 1,
+    "number_of_sholl_bins" = 16,
+    "number_of_total_sholl_bins" = 16,
+    "binsize" = 15000,
+    "filename_soma":"/allen/programs/celltypes/workgroups/em-connectomics/analysis_group/basil/auto_basil/auto_basil_features_w_cluster.pkl",
+    "filename_surfacearea":"/allen/programs/celltypes/workgroups/em-connectomics/analysis_group/basil/PSS/basil_scholl_surface_areas_full_15mic.pkl",
+    "filename_pss":"/allen/programs/celltypes/workgroups/em-connectomics/analysis_group/basil/PSS/classification/basil_PSS_histograms.pkl"
+    
+}
