@@ -108,16 +108,16 @@ def generate_distance_bins(neuron_df, data_synapses,cell_id):
 
 
 def read_1024features(cell_id,cfg):
-    file_directory = '%s/%s'%(cfg['pss_directory'],cell_id)
+    file_directory = '%s/%s/%s'% (cfg['pss_directory'] , cfg['type_of_shape'], cell_id)
+    
+    #file_directory = '%s/%s'%(cfg['pss_directory'],cell_id)
     feature_files  = glob.glob(file_directory+'/*manualV3.txt')
+    
     return feature_files
 
 
 def classify(feature_files,cell_id,data_synapses,cfg):
     # Import classifier model (SVC with linear kernel)
-    
-    print("This is the first data synapse:")
-    print(data_synapses.iloc[0])
     
     #Create predictions list and decision function list
     pred = []
@@ -128,15 +128,20 @@ def classify(feature_files,cell_id,data_synapses,cfg):
     umap0 = []
     umap1 = []
     allfullfeaturesfiles = []
+    
+    
     for i in range(0,data_synapses.shape[0]):
         exists = False    
         synapseid = data_synapses.iloc[i]['id']
+        
         for j in range (len(feature_files)):
             
             if feature_files[j].find("PSS_"+str(synapseid)+"_"+str(i)+"_ae") != -1:
                 exists = True
         if exists == True:
-            features_file = cfg['pss_directory'] + str(cell_id) + '/PSS_' + str(synapseid) + "_" + str(i) +'_ae_model_manualV3.txt'
+            print("Exists is true")
+            features_file = cfg['pss_directory'] + '/' + cfg['type_of_shape']+ '/' + str(cell_id) + '/PSS_' + str(synapseid) + "_" + str(i) +'_ae_model_manualV3.txt'
+            #features_file = feature_files[j]
             mesh_file = features_file.replace('_ae_model_manualV3.txt','.off')
             
             features = np.loadtxt(features_file)
@@ -144,8 +149,10 @@ def classify(feature_files,cell_id,data_synapses,cfg):
             
             feat_emb.append(features)
             allfullfeaturesfiles.append(mesh_file)
+            print('appending good inds')
             good_inds.append(i)
         else:
+            print("BAD INDS")
             features = np.ones(1024)*-100
             feat_emb.append(features)
             allfullfeaturesfiles.append('')
