@@ -693,10 +693,10 @@ def mySerialProcess(Obj):
             #print("Skipping synapse ", i)
  return obj   
    
-def findunprocessed_indices(allindices,Obj):
+def findunprocessed_indices(Obj):
     
     unproc = []
-    
+    allindices = len(Obj['rng'])
     for q in allindices:
         
         sid = Obj['data_synapses'].iloc[q]['id']
@@ -710,7 +710,7 @@ def findunprocessed_indices(allindices,Obj):
     
 def myParallelTasks(Obj):
     l = len(Obj['rng'])
-    unprocessed_inds = findunprocessed_indices(Obj['rng'],Obj)
+    unprocessed_inds = findunprocessed_indices(Obj)
     
     tq = LocalTaskQueue(parallel=45) # use 5 processes
 
