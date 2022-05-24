@@ -64,7 +64,7 @@ RUN pip install Pillow
 RUN pip install opencv_python
 RUN pip install grpcio-tools==1.21.*
 RUN pip install tensorflow-gpu
-
+RUN pip install caveclient
 
 RUN pip install scipy
 #RUN pip install pillow
@@ -77,34 +77,75 @@ RUN pip install umap-learn
 #RUN apt-get install libhdf5-dev -y
 RUN pip install h5py
 RUN pip install neuroglancer
-RUN pip install meshparty
+#RUN pip install meshparty
 RUN pip install pandas
 RUN pip install analysisdatalink
 RUN pip install annotationframeworkclient
 
+#RUN apt install libgl1-mesa-glx -y
+RUN pip install itkwidgets
+# Note from Kia-installed Tensorflow 2.5.0 made tensorflow-gpu==1.14.0 unsupported full notes in file 'tensorflow-update-output-details-07-28-2021.txt'
+RUN pip install tensorflow-gpu==1.14.0 
+RUN pip install meshparty
 
 
-RUN mkdir -p /usr/local/featureExtractionParty
-WORKDIR /usr/local/featureExtractionParty
-COPY . /usr/local/featureExtractionParty
-COPY jupyter_notebook_config.py /root/.jupyter/
+RUN apt-get update
+RUN apt install -y libgl1-mesa-glx
+RUN pip install task-queue
+RUN pip install AnalysisDataLink
+RUN pip install emannotationschemas==2.0.2
+ 
+RUN apt install git -y
+#RUN pip install  git+https://github.com/seung-lab/cloud-volume.git@lvl2_verify_false
+
+RUN git config --global user.name "Sharmishtaa Seshamani"
+RUN git config --global user.email "shtaaa@gmail.com"
+
+#RUN mkdir -p /usr/local/featureExtractionParty
+#WORKDIR /usr/local/featureExtractionParty
+#COPY . /usr/local/featureExtractionParty
+#COPY jupyter_notebook_config.py /root/.jupyter/
+#RUN pip install  -e .
+
 
 #INSTALL CGAL PYTHON
-ADD ./CGAL/cgal_functions /src/CGAL/cgal_functions
+ADD ./external/CGAL/cgal_functions /src/CGAL/cgal_functions
 RUN apt-get -y install g++
 RUN pip install -e /src/CGAL/cgal_functions
+#RUN pip install -e git+git://github.com/seung-lab/cloud-volume.git@lvl2_verify_false#egg=cloudvolume
 
-RUN apt install libgl1-mesa-glx -y
-RUN pip install itkwidgets
-RUN pip install tensorflow-gpu==1.14.0
+WORKDIR /usr/local/featureExtractionParty
+
+#RUN pip install  git+https://github.com/seung-lab/cloud-volume.git@lvl2_no_verify2
+RUN git clone https://github.com/seung-lab/cloud-volume.git
+WORKDIR /usr/local/featureExtractionParty/cloud-volume
+RUN git fetch
+RUN git checkout -b lvl2_no_verify2
+RUN git branch --set-upstream-to=origin/lvl2_no_verify2 lvl2_no_verify2
+RUN git pull
+RUN pip install .
+WORKDIR /usr/local/featureExtractionParty
+#RUN ./aws/install
+
+
+WORKDIR /root/.cloudvolume/secrets
+COPY google-secret.json .
+
+WORKDIR /usr/local/scripts
+COPY popqueue.py /usr/local/scripts/
+
+
+WORKDIR /usr/local/featureExtractionParty
 #add the cgal scripts
 
-WORKDIR /usr/local/featureExtractionParty/dashdataframe/DashDataFrame
-RUN pip install .
-WORKDIR /usr/local/featureExtractionParty/phenograph/PhenoGraph
-RUN pip install .
+#RUN apt-get install git
+#WORKDIR /usr/local/featureExtractionParty/external/dashdataframe/DashDataFrame
+#RUN pip install .
+#WORKDIR /usr/local/featureExtractionParty/external/phenograph/PhenoGraph
+#RUN pip install .
 
-
+RUN pip install cloud-files==4.7.0
+RUN pip install google-cloud-bigquery
 
 #RUN mkdir -p /scripts
 #ADD ./jupyter/run_jupyter.sh /scripts/
@@ -113,4 +154,10 @@ RUN pip install .
 #RUN chmod -R a+x /scripts
 #ENTRYPOINT ["/scripts/run_jupyter.sh"]
 
-EXPOSE 8050
+#EXPOSE 8051
+#EXPOSE 5001
+RUN mkdir -p /usr/local/featureExtractionParty
+WORKDIR /usr/local/featureExtractionParty
+COPY . /usr/local/featureExtractionParty
+COPY jupyter_notebook_config.py /root/.jupyter/
+RUN pip install  -e .
