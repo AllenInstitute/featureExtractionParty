@@ -18,13 +18,10 @@ import umap
 import matplotlib.pyplot as plt
 from sklearn import datasets, decomposition, manifold, preprocessing
 import cloudvolume
- 
 from featureExtraction import provider
 import importlib
-
 import pandas as pd
 from sklearn.cluster import KMeans
-
 import meshparty
 import time
 from meshparty import trimesh_io
@@ -55,16 +52,7 @@ from meshparty import skeleton_io
 from analysisdatalink.datalink_ext import AnalysisDataLinkExt as AnalysisDataLink
 from annotationframeworkclient import infoservice,FrameworkClient
 
-
-def update_synapses(data_synapses,cell_center_of_mass,threshold):
-    #print("starting update synapses")
-    #print(np.stack(data_synapses.ctr_pt_position.values).shape)
-    #print(cell_center_of_mass.shape)
-    dists = np.linalg.norm((np.stack(data_synapses.ctr_pt_position.values) - cell_center_of_mass ) * [4,4,40], axis=1)
-    data_synapses['dists'] = dists
-    return data_synapses[ data_synapses['dists'] < threshold]
         
-
 def extract_shape_updated(cfg,cell_id,run):
     procObj = {}
     
@@ -94,13 +82,9 @@ def extract_shape_updated(cfg,cell_id,run):
     procObj['sk'] = None
     print("This is my cell id: ",cell_id)
     if cfg["type_of_shape"] == "postsynaptic":
-        #print("Starting postsynaptic")
         procObj['data_synapses']= cfg['client'].materialize.query_table('synapses_pni_2',filter_in_dict={'post_pt_root_id':['%d'%cell_id]}, materialization_version = cfg['materialization_version'])
-        #print("next")
         procObj['cell_center_of_mass'] =cfg['client'].materialize.query_table('nucleus_detection_v0',filter_in_dict={'pt_root_id':['%d'%cell_id]},  materialization_version = cfg['materialization_version'])['pt_position'].values[0]
-        #print("starting update")
         procObj['data_synapses'] = update_synapses(procObj['data_synapses'], procObj['cell_center_of_mass'] , cfg['syn_distance_threshold'])
-        #print("update done")
     elif cfg["type_of_shape"] == "presynaptic":
         procObj['data_synapses']= cfg['client'].materialize.query_table('synapses_pni_2',filter_in_dict={'pre_pt_root_id':['%d'%cell_id]}, materialization_version = cfg['materialization_version'])
         procObj['cell_center_of_mass'] = None
@@ -125,52 +109,23 @@ def extract_shape_updated(cfg,cell_id,run):
     
     else:
         procObj['rng'] = range(cfg['selectedPSS'],cfg['selectedPSS']+1)
-        
-    #print("settingup cfg")
-    #print(procObj['rng'])
-        
-    #if cfg['type_of_shape'] == 'postsynaptic':
-    #    procObj['cell_center_of_mass'] =cfg['client'].materialize.query_table('nucleus_detection_v0',filter_in_dict={'pt_root_id':['%d'%cell_id]})['pt_position'].values[0]
-    #else:
-    #    procObj['cell_center_of_mass'] = None
-        
-    #print("done with query")
-    
-    #print(procObj['cell_center_of_mass'])
+            
     procObj['mesh_bounds'] = cfg['mesh_bounds']
     
     procObj['client'] = cfg['client']
     procObj['forcerun'] = cfg['forcerun']
-    #procObj['cv'] = cfg['cv']
-    
-    #spinemesh= pss_extraction_utils_updated.myprocessingfunc(procObj,0,72)
-    #return spinemesh
-    #print("Debug 0")
+
     if run == "parallel" :
-        #print("Doing parallel")
         obj = pss_extraction_utils_updated.myParallelProcess(procObj)
     elif run == "parallelTasks":
-        #print("Doing parallel tasks")
         obj = pss_extraction_utils_updated.myParallelTasks(procObj)
     elif run == "noextraction":
         print("No Extraction")
         obj = None
     else:
-        #print("Doing serial")
         obj = pss_extraction_utils_updated.mySerialProcess(procObj)
         
-    #print("Debug 1 : ", type(obj))
-    
     return procObj,obj
-
-
-    
-def generate_features(procObj):
-    procObj['pointnet_files'] = glob.glob(procObj['outdir']+'/PSS*.off')
-    tf.reset_default_graph()
-    pss_extraction_utils_updated.evaluate(procObj)
-    tf.reset_default_graph()
-
 
 def extract_shape_and_generate_features_updated(config_file,cell_id_list,run="parallel"):
     with open(config_file) as f:
@@ -205,4 +160,43 @@ def extract_shape_and_generate_features_updated(config_file,cell_id_list,run="pa
         
     return procObj, obj
     
+def generate_features(procObj):
+    '''
+    Given a processing object, find all PSS files, run it through the pointnet encoder 
+    and create save output feature files.
+
+    Parameters
+    ----------
+    procObj: dict
+        Dict object containing all the information for processing feature extraction.
+
+    '''
+    procObj['pointnet_files'] = glob.glob(procObj['outdir']+'/PSS*.off')
+    tf.reset_default_graph()
+    pss_extraction_utils_updated.evaluate(procObj)
+    tf.reset_default_graph()    
+
+
+def update_synapses(data_synapses,cell_center_of_mass,threshold):
+    '''
+    Given a dataframe containing synapses, the cell center of mass and a threshold 
+    for distance from the center of mass, find all synapses within this radius and
+    return them.
+
+    Parameters
+    ----------
+    data_synapses: pandas.DataFrame
+          Dataframe containing synapse ids and all the information for a synapse
+    cell_center_of_mass: numpy.array
+          3x1 numpy array for the coordinates of the center of mass of the nucleus of the cell
+    threshold : int
+          Value specifying radius within which to filter synapses
     
+    Returns
+    -------
+    data_synapses: pandas.DataFrame
+          Dataframe containing only synapses within the threshold radius
+    '''
+    dists = np.linalg.norm((np.stack(data_synapses.ctr_pt_position.values) - cell_center_of_mass ) * [4,4,40], axis=1)
+    data_synapses['dists'] = dists
+    return data_synapses[ data_synapses['dists'] < threshold]
