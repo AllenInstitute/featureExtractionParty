@@ -56,6 +56,15 @@ from analysisdatalink.datalink_ext import AnalysisDataLinkExt as AnalysisDataLin
 from annotationframeworkclient import infoservice,FrameworkClient
 
 
+def update_synapses(data_synapses,cell_center_of_mass,threshold):
+    #print("starting update synapses")
+    #print(np.stack(data_synapses.ctr_pt_position.values).shape)
+    #print(cell_center_of_mass.shape)
+    dists = np.linalg.norm((np.stack(data_synapses.ctr_pt_position.values) - cell_center_of_mass ) * [4,4,40], axis=1)
+    data_synapses['dists'] = dists
+    return data_synapses[ data_synapses['dists'] < threshold]
+        
+
 def extract_shape_updated(cfg,cell_id,run):
     procObj = {}
     
@@ -70,6 +79,7 @@ def extract_shape_updated(cfg,cell_id,run):
     procObj['segsource'] = cfg['segsource']
     procObj['token'] = cfg['token']
     procObj['type_of_shape'] = cfg['type_of_shape']
+    procObj['cloud_bucket'] = cfg['cloud_bucket']
     
     #inits - just cell id and directories
     procObj['cell_id'] = int(cell_id)
@@ -84,10 +94,16 @@ def extract_shape_updated(cfg,cell_id,run):
     procObj['sk'] = None
     print("This is my cell id: ",cell_id)
     if cfg["type_of_shape"] == "postsynaptic":
-        procObj['data_synapses']= cfg['client'].materialize.query_table('synapses_pni_2',filter_in_dict={'post_pt_root_id':['%d'%cell_id]})
-        
+        #print("Starting postsynaptic")
+        procObj['data_synapses']= cfg['client'].materialize.query_table('synapses_pni_2',filter_in_dict={'post_pt_root_id':['%d'%cell_id]}, materialization_version = cfg['materialization_version'])
+        #print("next")
+        procObj['cell_center_of_mass'] =cfg['client'].materialize.query_table('nucleus_detection_v0',filter_in_dict={'pt_root_id':['%d'%cell_id]},  materialization_version = cfg['materialization_version'])['pt_position'].values[0]
+        #print("starting update")
+        procObj['data_synapses'] = update_synapses(procObj['data_synapses'], procObj['cell_center_of_mass'] , cfg['syn_distance_threshold'])
+        #print("update done")
     elif cfg["type_of_shape"] == "presynaptic":
-        procObj['data_synapses']= cfg['client'].materialize.query_table('synapses_pni_2',filter_in_dict={'pre_pt_root_id':['%d'%cell_id]})
+        procObj['data_synapses']= cfg['client'].materialize.query_table('synapses_pni_2',filter_in_dict={'pre_pt_root_id':['%d'%cell_id]}, materialization_version = cfg['materialization_version'])
+        procObj['cell_center_of_mass'] = None
     else: 
         print("Did not recognize shape type! Should be one of : presynaptic, postsynaptic")
       
@@ -110,14 +126,15 @@ def extract_shape_updated(cfg,cell_id,run):
     else:
         procObj['rng'] = range(cfg['selectedPSS'],cfg['selectedPSS']+1)
         
-    print("settingup cfg")
+    #print("settingup cfg")
+    #print(procObj['rng'])
         
-    if cfg['type_of_shape'] == 'postsynaptic':
-        procObj['cell_center_of_mass'] =cfg['client'].materialize.query_table('nucleus_detection_v0',filter_in_dict={'pt_root_id':['%d'%cell_id]})['pt_position'].values[0]
-    else:
-        procObj['cell_center_of_mass'] = None
+    #if cfg['type_of_shape'] == 'postsynaptic':
+    #    procObj['cell_center_of_mass'] =cfg['client'].materialize.query_table('nucleus_detection_v0',filter_in_dict={'pt_root_id':['%d'%cell_id]})['pt_position'].values[0]
+    #else:
+    #    procObj['cell_center_of_mass'] = None
         
-    print("done with query")
+    #print("done with query")
     
     #print(procObj['cell_center_of_mass'])
     procObj['mesh_bounds'] = cfg['mesh_bounds']
@@ -128,18 +145,21 @@ def extract_shape_updated(cfg,cell_id,run):
     
     #spinemesh= pss_extraction_utils_updated.myprocessingfunc(procObj,0,72)
     #return spinemesh
-    print("Debug 0")
+    #print("Debug 0")
     if run == "parallel" :
-        print("Doing parallel")
+        #print("Doing parallel")
         obj = pss_extraction_utils_updated.myParallelProcess(procObj)
     elif run == "parallelTasks":
-        print("Doing parallel tasks")
+        #print("Doing parallel tasks")
         obj = pss_extraction_utils_updated.myParallelTasks(procObj)
+    elif run == "noextraction":
+        print("No Extraction")
+        obj = None
     else:
-        print("Doing serial")
+        #print("Doing serial")
         obj = pss_extraction_utils_updated.mySerialProcess(procObj)
         
-    print("Debug 1 : ", type(obj))
+    #print("Debug 1 : ", type(obj))
     
     return procObj,obj
 
@@ -176,10 +196,11 @@ def extract_shape_and_generate_features_updated(config_file,cell_id_list,run="pa
     
     #Processing
     for cell_id in cell_id_list:
-        print(cell_id)
+        #print(cell_id)
         procObj,obj = extract_shape_updated(cfg,cell_id,run)
         cfg['offfiles'] = procObj['offfiles']
         cfg['outdir'] = procObj['outdir']
+        
         procObj = generate_features(cfg)
         
     return procObj, obj

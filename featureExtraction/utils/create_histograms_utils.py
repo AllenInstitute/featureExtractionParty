@@ -15,6 +15,8 @@ from sklearn import datasets, decomposition, manifold, preprocessing
 import os,sys,inspect
 currentdir = "/usr/local/featureExtractionParty/external/pointnet_spine_ae"
 sys.path.insert(0,currentdir) 
+currentdir = "/allen/programs/celltypes/workgroups/em-connectomics/analysis_group/forSharmi/code/featureExtractionParty/external/pointnet_spine_ae"
+sys.path.insert(0,currentdir) 
 import provider
 import importlib
 
@@ -55,6 +57,7 @@ from itkwidgets import view
 import joblib
 import sys
 sys.setrecursionlimit(10000)
+from cloudfiles import CloudFiles
 print("Finished imports")
 
 
@@ -115,6 +118,53 @@ def read_1024features(cell_id,cfg):
     
     return feature_files
 
+def loadCloudJsonFile (Obj,filenames):
+    #read mesh
+    cloudbucket = Obj['cloud_bucket']
+    with open(Obj['google_secrets_file'], 'r') as file:
+        secretstring = file.read().replace('\n', '')
+    cf = CloudFiles(cloudbucket,secrets =secretstring)
+    f = cf.get_json(filenames)
+    return f
+
+def classify_cloud(data_synapses,Obj):
+    filenames = []
+
+    for i, row in data_synapses.iterrows():
+        filenames.append('%s/features/PSS_%d_ae_model_manualV3.json'%(Obj['type_of_shape'],row.id))
+
+    feat_emb = loadCloudJsonFile(Obj,filenames)
+    
+    
+    badinds = [i for i in range(len(feat_emb)) if feat_emb[i] == None]
+    
+    
+    
+    try:
+        data_synapses.reset_index(inplace=True)
+    except:
+        print("data_synapses already reindexed")
+    
+    data_synapses.drop(data_synapses.index[badinds], inplace=True)
+    
+    feat_emb = list(filter(None, feat_emb))
+    
+    
+    umap2d = Obj['reducer'].transform(np.array(feat_emb))
+    #print(umap2d.shape)
+    #umap0 = np.ones(data_synapses.shape[0])*-1000
+    #umap1 = np.ones(data_synapses.shape[0])*-1000
+    #index = 0
+    #for g in range(newfew):
+    #    umap0[g] = umap2d[index,0] 
+    #    umap1[g] = umap2d[index,1]
+    #    index+=1
+    umap0 = umap2d[:,0]
+    umap1 = umap2d[:,1]
+    
+    return umap0,umap1,feat_emb,data_synapses
+
+
 
 def classify(feature_files,cell_id,data_synapses,cfg):
     # Import classifier model (SVC with linear kernel)
@@ -136,11 +186,14 @@ def classify(feature_files,cell_id,data_synapses,cfg):
         
         for j in range (len(feature_files)):
             
-            if feature_files[j].find("PSS_"+str(synapseid)+"_"+str(i)+"_ae") != -1:
+            if feature_files[j].find("PSS_"+str(synapseid)+"_") != -1:
+            #if feature_files[j].find("PSS_"+str(synapseid)+"_"+str(i)+"_ae") != -1:
                 exists = True
+                features_file = feature_files[j]
+                
         if exists == True:
             print("Exists is true")
-            features_file = cfg['pss_directory'] + '/' + cfg['type_of_shape']+ '/' + str(cell_id) + '/PSS_' + str(synapseid) + "_" + str(i) +'_ae_model_manualV3.txt'
+            #features_file = cfg['pss_directory'] + '/' + cfg['type_of_shape']+ '/' + str(cell_id) + '/PSS_' + str(synapseid) + "_" + str(i) +'_ae_model_manualV3.txt'
             #features_file = feature_files[j]
             mesh_file = features_file.replace('_ae_model_manualV3.txt','.off')
             
@@ -172,7 +225,7 @@ def classify(feature_files,cell_id,data_synapses,cfg):
     return umap0,umap1,feat_emb,allfullfeaturesfiles
 
 #Populate dataframe
-def populate_dataframe(data_synapses,features,feature_embedding0,feature_embedding1,myfiles):
+def populate_dataframe(data_synapses,features,feature_embedding0,feature_embedding1,myfiles=None):
     #data_synapses['class (linear SVC, 1024 features)'] = pred
     #data_synapses['decision function'] = dec_func
     #print(data_synapses.shape)
@@ -182,6 +235,9 @@ def populate_dataframe(data_synapses,features,feature_embedding0,feature_embeddi
     data_synapses['umap0'] = feature_embedding0
     data_synapses['umap1'] = feature_embedding1
     data_synapses['feature1024'] = features
-    data_synapses['pss_mesh_file'] = myfiles
+    if myfiles is None:
+        print("No files")
+    else:
+        data_synapses['pss_mesh_file'] = myfiles
     return data_synapses
     

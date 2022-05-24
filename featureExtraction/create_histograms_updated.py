@@ -1,4 +1,4 @@
-from featureExtraction.utils import create_histograms_utils
+from featureExtraction.utils import create_histograms_utils, pss_extraction_utils_updated
 import json
 from analysisdatalink.datalink_ext import AnalysisDataLinkExt as AnalysisDataLink
 import pandas as pd
@@ -7,6 +7,24 @@ import joblib
 import pickle
 from annotationframeworkclient import FrameworkClient
 import os
+from caveclient import CAVEclient
+from cloudfiles import CloudFiles
+from taskqueue import queueable
+import importlib 
+import os,sys,inspect
+currentdir = "/usr/local/featureExtractionParty/external/pointnet_spine_ae"
+sys.path.insert(0,currentdir) 
+currentdir = "/allen/programs/celltypes/workgroups/em-connectomics/analysis_group/forSharmi/code/featureExtractionParty/external/pointnet_spine_ae"
+sys.path.insert(0,currentdir) 
+
+def update_synapses(data_synapses,cell_center_of_mass,threshold):
+    #print("starting update synapses")
+    #print(np.stack(data_synapses.ctr_pt_position.values).shape)
+    #print(cell_center_of_mass.shape)
+    dists = np.linalg.norm((np.stack(data_synapses.ctr_pt_position.values) - cell_center_of_mass ) * [4,4,40], axis=1)
+    data_synapses['dists'] = dists
+    return data_synapses[ data_synapses['dists'] < threshold]
+      
 
 def create_one_histogram(cell_id,cfg,mydict):
     #read and query
@@ -79,6 +97,46 @@ def create_histograms(config_file, cell_id_list = None):
         
     return mydict
 
+def create_dataframes_from_cloud(config_file,cell_id_list = None):
+    
+    with open(config_file) as f:
+      cfg = json.load(f)
+    
+    
+    #INITS
+    print("Starting inits,",cfg['auth_token_file'])
+    cfg['client'] = CAVEclient(cfg['dataset_name'],auth_token_file=cfg['auth_token_file'])
+    
+    print("reducer file")
+    cfg['reducer'] = joblib.load(open(cfg['pss_2d_umap_reducer_file'], 'rb'))
+    
+    
+    if cell_id_list == None:
+        
+        cell_id_list = list(cfg['pt_root_id'])
+    
+    for cell_id in cell_id_list:
+        
+        outputdirectory = '%s/%s'%(cfg['pss_dataframe_directory'],cfg['type_of_shape'])
+        if not os.path.exists(outputdirectory):
+            os.makedirs(outputdirectory)
+        
+        outputfile = '%s/PSS_UMAP_%d.pkl'%(outputdirectory,cell_id)
+        
+        if (not os.path.exists(outputfile)) | (cfg['forcesavedataframe'] == True):
+
+            if cfg['type_of_shape'] == 'postsynaptic':
+                data_synapses = cfg['client'].materialize.query_table('synapses_pni_2',filter_in_dict={'post_pt_root_id':['%d'%cell_id]}, materialization_version = 117)
+                
+            else:
+                data_synapses = cfg['client'].materialize.query_table('synapses_pni_2',filter_in_dict={'pre_pt_root_id':['%d'%cell_id]}, materialization_version = 117)
+            
+
+            feature_embedding0,feature_embedding1,features, data_synapses = create_histograms_utils.classify_cloud(data_synapses,cfg)
+
+            print("Saving to ... %s"%outputfile)
+            pickle.dump(create_histograms_utils.populate_dataframe(data_synapses, features, feature_embedding0, feature_embedding1),open(outputfile, "wb" ))
+    
 
 def create_dataframes(config_file,cell_id_list = None):
     with open(config_file) as f:
@@ -92,7 +150,7 @@ def create_dataframes(config_file,cell_id_list = None):
     #                     materialization_version=cfg['data_version'],
     #                     verbose=False)
     #cfg['neuron_df'] = pd.read_pickle(cfg['input_cell_db'])
-    cfg['neuron_df'] = cfg['client'].materialize.query_table('allen_v1_column_types_v2', filter_in_dict={'pt_root_id':[864691136672628359]})
+    #cfg['neuron_df'] = cfg['client'].materialize.query_table('allen_v1_column_types_v2', filter_in_dict={'pt_root_id':[864691136672628359]})
 
     
     cfg['reducer'] = joblib.load(open(cfg['pss_2d_umap_reducer_file'], 'rb'))
@@ -112,13 +170,44 @@ def create_dataframes(config_file,cell_id_list = None):
         if (not os.path.exists(outputfile)) | (cfg['forcesavedataframe'] == True):
 
             if cfg['type_of_shape'] == 'postsynaptic':
-                data_synapses = cfg['client'].materialize.query_table('synapses_pni_2',filter_in_dict={'post_pt_root_id':['%d'%cell_id]})
+                data_synapses = cfg['client'].materialize.query_table('synapses_pni_2',filter_in_dict={'post_pt_root_id':['%d'%cell_id]}, materialization_version = 117)
+                
             else:
-                data_synapses = cfg['client'].materialize.query_table('synapses_pni_2',filter_in_dict={'pre_pt_root_id':['%d'%cell_id]})
+                data_synapses = cfg['client'].materialize.query_table('synapses_pni_2',filter_in_dict={'pre_pt_root_id':['%d'%cell_id]}, materialization_version = 117)
             feature_files = create_histograms_utils.read_1024features(str(cell_id),cfg)
 
             feature_embedding0,feature_embedding1,features,myfiles = create_histograms_utils.classify(feature_files,str(cell_id),data_synapses,cfg)
 
             print("Saving to ... %s"%outputfile)
             pickle.dump(create_histograms_utils.populate_dataframe(data_synapses, features, feature_embedding0, feature_embedding1, myfiles),open(outputfile, "wb" ))
+    
+@queueable
+def createfeatures(Obj, cell_id):
+    
+    Obj['tensorflow_model'] = importlib.import_module('models.model') # import network module
+    
+    if not os.path.exists(Obj['pointnet_dump_dir']): os.mkdir(Obj['pointnet_dump_dir'])
+    
+    Obj['LOG_FOUT'] = open(os.path.join(Obj['pointnet_dump_dir'], 'log_evaluate.txt'), 'w')
+    
+    
+    client = CAVEclient(Obj['dataset_name'],auth_token_file=Obj['auth_token_file'])    
+    
+    cell_center_of_mass =np.array(client.materialize.query_table('nucleus_detection_v0',filter_in_dict={'pt_root_id':['%d'%cell_id]}, materialization_version = Obj['materialization_version'])['pt_position'].values[0])
+    
+    
+    if Obj['type_of_shape'] == 'postsynaptic':
+            ds = client.materialize.query_table('synapses_pni_2',filter_in_dict={'post_pt_root_id':['%d'%cell_id]}, materialization_version = 117)
+
+    else:
+            ds = client.materialize.query_table('synapses_pni_2',filter_in_dict={'pre_pt_root_id':['%d'%cell_id]}, materialization_version = 117)
+    
+
+    print("This is the shape of synapses: ", ds.shape)
+
+    ds = update_synapses(ds,cell_center_of_mass,Obj['syn_distance_threshold'])
+    
+    pss_extraction_utils_updated.featureExtractionTask_cell(Obj,cell_id,ds) 
+    
+    create_dataframes_from_cloud(Obj,[cell_id])
     
