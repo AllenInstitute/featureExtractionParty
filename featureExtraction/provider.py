@@ -202,6 +202,8 @@ def loadAllOffDataFile(filename,num_points):
     assert os.path.isfile(filename)
     with open(filename) as fname:
     	content = fname.readlines()
+        
+    print("This is off file: ", filename)
     nums = content[1].split() # 0 - numvert, 1 - numfaces, 2 - numedges
     v = content[2:2+int(nums[0])]
     f = content[2+int(nums[0]): 2+int(nums[0])+int(nums[1])]
