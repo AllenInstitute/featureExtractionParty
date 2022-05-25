@@ -20,14 +20,10 @@ from cloudfiles import CloudFiles
 import os,sys,inspect
 currentdir = "/usr/local/featureExtractionParty/external/pointnet_spine_ae"
 sys.path.insert(0,currentdir) 
-#currentdir = "/allen/programs/celltypes/workgroups/em-connectomics/analysis_group/forSharmi/code/featureExtractionParty/external/pointnet_spine_ae"
-#sys.path.insert(0,currentdir) 
 from featureExtraction import provider
 import importlib
-
 import pandas as pd
 from sklearn.cluster import KMeans
-
 import meshparty
 import time
 from meshparty import trimesh_io
@@ -55,11 +51,8 @@ from multiprocessing import Pool
 from functools import partial
 from scipy import sparse
 from meshparty import skeleton_io
-#from analysisdatalink.datalink_ext import AnalysisDataLinkExt as AnalysisDataLink
 from annotationframeworkclient import infoservice
 from itkwidgets import view
-#from imageryclient import imagery
-
 from functools import partial
 from taskqueue import LocalTaskQueue
 from taskqueue import queueable
@@ -69,8 +62,6 @@ from google.cloud import storage
 from caveclient import CAVEclient
 
 
-def savedebugmesh(mesh):
-    trimesh.exchange.export.export_mesh(mesh,"test.off")
 
 
 def assign_labels_to_verts(mesh,labels):
@@ -84,53 +75,35 @@ def assign_labels_to_verts(mesh,labels):
         
     return vert_labels
 
-def get_indices_of_skeleton_verts(mesh, sk):
-    mv = mesh.vertices
-    sv = sk.vertices
-    mvl = np.ndarray.tolist(mv)
-    indices = []
-    for s in sv:
-        if s in mv:
-            indices.append(getind(mvl, s))
-    return indices
+def calculate_sdf(mesh_filt):
+    ray_inter = ray_pyembree.RayMeshIntersector(mesh_filt)
+    # The first argument below sets the origin of the ray, and I use
+    # the vertex normal to move the origin slightly so it doesn't hit at the initial vertex point
+    # and I can set multiple hits to False
 
-def getind(vertexlist, point):
-    for i in range(0, len(vertexlist)):
-        if( (point[0] == vertexlist[i][0]) & (point[1] == vertexlist[i][1]) & (point[2] == vertexlist[i][2])  ):
-            return i
-    return -1
+    # The first argument below sets the origin of the ray, and I use
+    # the vertex normal to move the origin slightly so it doesn't hit at the initial vertex point
+    # and I can set multiple hits to False
 
-def create_submeshes(mesh,  labels):
-    allsubmeshes = []
-    allkeys = []
-    mydict = {}
-    unique_labels = list(set(labels))
-    for i,u in enumerate(unique_labels):
-        inds = [j for j,val in enumerate(labels) if val==u]
-        submesh = mesh.submesh([inds])
-        mydict[u] = submesh
-    return mydict
-    
+    rs = np.zeros(len(mesh_filt.vertices))
+    good_rs = np.full(len(rs), False)
 
-def find_closest_component(loc_mesh, x,y,z):
+    itr = 0
+    while not np.all(good_rs):
+        
+        blank_inds = np.where(~good_rs)[0]
+        starts = (mesh_filt.vertices-mesh_filt.vertex_normals)[~good_rs,:]
+        vs = (-mesh_filt.vertex_normals+0.001*np.random.rand(*mesh_filt.vertex_normals.shape))[~good_rs,:]
 
-    print(x,y,z)
-    print(np.mean(loc_mesh.vertices,axis=1))    
-    allmeshes = trimesh.graph.split(loc_mesh,only_watertight=False)
-    dist=None
-    besta = None
-    for a in allmeshes:
-        closest, distance, triangle = trimesh.proximity.closest_point(a, np.array([[x*4,y*4,z*40]])) 
-        if (dist is None) :
-            besta =a 
-            dist = np.abs(distance[0])
-        elif  (np.abs(distance[0])< dist) :
-            besta =a 
-            dist = np.abs(distance[0])
-        else:
-            t = 10
-            #print("Nothing changed")
-    return besta
+        rtrace = ray_inter.intersects_location(starts, vs, multiple_hits=False)
+        # radius values
+        if len(rtrace[0])>0:
+            rs[blank_inds[rtrace[1]]] = np.linalg.norm(mesh_filt.vertices[rtrace[1]]-rtrace[0], axis=1)
+            good_rs[blank_inds[rtrace[1]]]=True
+        itr+=1
+        if itr>10:
+            break
+    return rs
 
 def check_if_entry_exists(synid,credentials_path):
     print("checking")
@@ -152,117 +125,296 @@ def check_if_entry_exists(synid,credentials_path):
     else:
         return False
 
-
-def insert_into_PSS_table(synid, pss_vector, cellid, credentials_path):
-    #credentials_path = '/Users/sharmishtaas/Documents/code/testBigQuery/exalted-beanbag-334502-1a080bb80b37.json'
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
-
-    # Construct a BigQuery client object.
-    client = bigquery.Client()
-
-
-    sql = """
-    select * from  exalted-beanbag-334502.TestDataSet.PSSTable
-    where SynapseID = %d
-    """%synid
-
-    query_job = client.query(sql)  
-    numrows = query_job.result().total_rows
-    print("This is numrows before insert ",numrows)
-    print(type(synid))
-    print(type(cellid))
-    print(type(pss_vector))
-    print(type(pss_vector[0]))
-    
-    table_id = "exalted-beanbag-334502.TestDataSet.PSSTable"
-
-    rows_to_insert = [
-        {u"SynapseID": synid, u"PSSVec": pss_vector,  u"pt_root_id": int(cellid)}
-    ]
-
-    #table_id = "exalted-beanbag-334502.TestDataSet.MyNewTable"
-
-    #rows_to_insert = [
-    #    {"SynapseID": synid, "pt_root_id": cellid}
-    #]
-
-    print("Before inserting")
-    errors = client.insert_rows_json(table_id, rows_to_insert)  # Make an API request.
-
-    print("After inserting")
-    if errors == []:
-        print("New rows have been added.")
-    else:
-        print("Encountered errors while inserting rows: {}".format(errors))
-
 def create_closest_submesh(loc_mesh,seg,x,y,z):
     nfaces = trimesh.proximity.nearby_faces(loc_mesh, [[x,y,z]])
     searchseg = seg[nfaces[0][0]]
     inds = [i for i,val in enumerate(seg) if val==searchseg]
     spine_mesh = loc_mesh.submesh([inds]) 
     return spine_mesh[0]
-     
-def save_submeshes(submeshes,inds):
-    for i,ind in enumerate(inds):
-        trimesh.exchange.export.export_mesh(submeshes[ind][0], "debug/pathspine_%d_%d.off"%(ind,i)) 
- 
-def remove_bad_faces (mesh):
-    allfaces = []
-    for f in  mesh.faces:
-        if f[0] == f[1]:
-            x=1
-        elif (f[1] == f[2]):
-            x=1
-        elif f[0] == f[2]:
-            x=1
+
+def create_data(Obj,m,num_points):
+        #read mesh
+    try:
+        numvertices = len(m.vertices)
+        if (numvertices > -100):
+            #m = trimesh.Trimesh(vertices,faces)
+
+            cm = np.mean(m.vertices,axis=0)
+
+            m.vertices = m.vertices-cm
+
+            m.vertices = rotate_to_principal_component(m.vertices)
+
+            vertices, fi = trimesh.sample.sample_surface(m,num_points)
+
+            vertices = np.expand_dims(vertices, axis=0)
+            labels = np.ndarray([1])
+            return (vertices,labels)
         else:
-            allfaces.append(list(f))
-    return np.array(allfaces)
-
-
-def get_mesh(centerpoint, cutout_radius,  segid, bounds, mip, imageclient):
-    seg_cutout = imageclient.segmentation_cutout(bounds,mip=mip,root_ids=[segid])
-    seg_cutout = np.squeeze(seg_cutout)
-    mask = seg_cutout == segid
-    mask = np.squeeze(mask)
-    mesh = get_trimesh_from_segmask(mask,centerpoint, cutout_radius, mip, imageclient)
-    return mesh
-
-def get_trimesh_from_segmask(seg_mask, og_cm, cutout_radius, mip, imageclient):
+            return None,None
+    except:
+        return None,None
     
-    mip_resolution = imageclient.segmentation_cv.mip_resolution(mip)
-    spacing_nm = mip_resolution
-    seg_image_data = image_data_from_vol_numpy((255*seg_mask).astype(np.uint8),
-                                        spacing = spacing_nm, origin=og_cm-cutout_radius)
+def create_submeshes(mesh,  labels):
+    allsubmeshes = []
+    allkeys = []
+    mydict = {}
+    unique_labels = list(set(labels))
+    for i,u in enumerate(unique_labels):
+        inds = [j for j,val in enumerate(labels) if val==u]
+        submesh = mesh.submesh([inds])
+        mydict[u] = submesh
+    return mydict
 
-    surface =vtk.vtkMarchingCubes()
-    surface.SetInputData(seg_image_data)
-    surface.ComputeScalarsOff()
-    surface.ComputeNormalsOn()
-    surface.SetValue(0, 128)
-    surface.Update()
+def dist2pt (features, pt):
+    features = np.array(features)
+    pt = np.array(pt)
+    dists = np.linalg.norm(features-pt[np.newaxis,:],axis=1) 
+    return np.argmin(dists,axis=0) 
 
-    points, tris, edges = trimesh_vtk.poly_to_mesh_components(surface.GetOutput())
-    new_mesh = trimesh_io.Mesh(points, tris)
-    is_big = mesh_filters.filter_largest_component(new_mesh)
-    new_mesh = new_mesh.apply_mask(is_big)
-
-    return new_mesh
-
-def image_data_from_vol_numpy(arr, spacing=[1,1,1], origin=[0,0,0]):
-    #da=trimesh_vtk.numpy_to_vtk(arr.ravel()) #.ravel returns a contiguous flattened array
+def eval_one_epoch(Obj, sess, ops, num_votes=1, topk=1):
+    features = []
+    filenames = []
     
-    da = trimesh_vtk.numpy_to_vtk(np.ravel(arr,order='F'))
-    image_data = vtk.vtkImageData()
-    image_data.SetDimensions(arr.shape)
-    image_data.SetExtent(0, arr.shape[0]-1, 0,
-                           arr.shape[1]-1, 0, arr.shape[2]-1)
-    #assumes 1,1 spacing.
-    image_data.SetSpacing(spacing)
-    image_data.SetOrigin(origin)
-    image_data.GetPointData().SetScalars(da)
+    is_training = False
+    fout = open(os.path.join(Obj['pointnet_dump_dir'], 'pred_label.txt'), 'w')
+    for fn in range(len(Obj['pointnet_files'])):
+        outfile = Obj['pointnet_files'][fn].replace(".h5","_ae_model_manualV3.txt")
+        if (not os.path.exists(outfile)) | (Obj['forcecreatefeatures'] == True):
+        #if 1 ==1:
+            log_string(Obj,'----'+str(fn)+'----')
+            #print(Obj['pointnet_files'][fn])
+            current_data, current_label = provider.loadAllOffDataFile(Obj['pointnet_files'][fn], Obj['pointnet_num_points'])
+            #current_data,current_label = loadCloudH5File(Obj,Obj['pointnet_files'][fn], Obj['pointnet_num_points'])
+            if current_data is not None:
+                feed_dict = {ops['pointclouds_pl']: current_data,
+                                     ops['labels_pl']: current_label,
+                                     ops['is_training_pl']: is_training}
+                pred_val = sess.run([ops['embedding']], feed_dict=feed_dict)
+                
+                np.savetxt(outfile,np.squeeze(pred_val))
+
+def evaluate(Obj, num_votes=1):
+    is_training = False
+     
+    with tf.device('/gpu:'+str(Obj['pointnet_GPU_INDEX'])):
+        
+        pointclouds_pl, labels_pl = Obj['tensorflow_model'].placeholder_inputs(Obj['pointnet_batch_size'], Obj['pointnet_num_points'])
+        #print(pointclouds_pl.shape)
+        is_training_pl = tf.placeholder(tf.bool, shape=())
+        labels_pl_rep = tf.placeholder(tf.float32,shape=(1))
+
+        # simple model
+        pred, end_points = Obj['tensorflow_model'].get_model(pointclouds_pl, is_training_pl)
+       #print("Size of embedding")
+        #print(pred.shape)
+        
+        # Add ops to save and restore all the variables.
+        saver = tf.train.Saver()
+        
+    # Create a session
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    config.allow_soft_placement = True
+    config.log_device_placement = True
+    sess = tf.Session(config=config)
+
+    # Restore variables from disk.
+    saver.restore(sess, Obj['pointnet_model_path'])
+    log_string(Obj,"Model restored.")
+
+    ops = {'pointclouds_pl': pointclouds_pl,
+           'labels_pl': labels_pl_rep,
+           'is_training_pl': is_training_pl,
+           'pred': pred,
+           'embedding': end_points['embedding']
+           }
+    eval_one_epoch(Obj, sess, ops, num_votes)
+    #features,files = eval_one_epoch(FILES, sess, ops, num_votes)
+    #features = np.array(features)
+    #return features,files
     
-    return image_data
+def evaluate_cloud(Obj, num_votes=1):
+    is_training = False
+     
+    with tf.device('/gpu:'+str(Obj['pointnet_GPU_INDEX'])):
+        
+        pointclouds_pl, labels_pl = Obj['tensorflow_model'].placeholder_inputs(Obj['pointnet_batch_size'], Obj['pointnet_num_points'])
+        #print(pointclouds_pl.shape)
+        is_training_pl = tf.placeholder(tf.bool, shape=())
+        labels_pl_rep = tf.placeholder(tf.float32,shape=(1))
+
+        # simple model
+        pred, end_points = Obj['tensorflow_model'].get_model(pointclouds_pl, is_training_pl)
+       #print("Size of embedding")
+        #print(pred.shape)
+        
+        # Add ops to save and restore all the variables.
+        saver = tf.train.Saver()
+        
+    # Create a session
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    config.allow_soft_placement = True
+    config.log_device_placement = True
+    sess = tf.Session(config=config)
+
+    # Restore variables from disk.
+    saver.restore(sess, Obj['pointnet_model_path'])
+    log_string(Obj,"Model restored.")
+
+    ops = {'pointclouds_pl': pointclouds_pl,
+           'labels_pl': labels_pl_rep,
+           'is_training_pl': is_training_pl,
+           'pred': pred,
+           'embedding': end_points['embedding']
+           }
+    eval_one_epoch_cloud_multi(Obj, sess, ops, num_votes)
+    #features,files = eval_one_epoch(FILES, sess, ops, num_votes)
+    #features = np.array(features)
+    #return features,files
+
+def eval_one_epoch_cloud(Obj, sess, ops, num_votes=1, topk=1):
+    
+    is_training = False
+    fout = open(os.path.join(Obj['pointnet_dump_dir'], 'pred_label.txt'), 'w')
+    for fn in range(len(Obj['pointnet_files'])):
+        outfile = Obj['pointnet_files'][fn].replace(".h5","_ae_model_manualV3.json")
+        outfile = outfile.replace("PSS", "features/PSS")
+        
+        #if (not os.path.exists(outfile)) | (Obj['forcecreatefeatures'] == True):
+        if 1 ==1:
+            log_string(Obj,'----'+str(fn)+'----')
+            #print(Obj['pointnet_files'][fn])
+            
+            current_data,current_label = loadCloudH5File(Obj,Obj['pointnet_files'][fn], Obj['pointnet_num_points'])
+            if current_data is not None:
+                feed_dict = {ops['pointclouds_pl']: current_data,
+                                     ops['labels_pl']: current_label,
+                                     ops['is_training_pl']: is_training}
+                pred_val = sess.run([ops['embedding']], feed_dict=feed_dict)
+                #pred_val = sess.run([ops['pred']], feed_dict=feed_dict)
+
+                
+                cf = CloudFiles(Obj['cloud_bucket'],secrets =Obj['google_secrets_file'])
+                with open(Obj['google_secrets_file'], 'r') as file:
+                    secretstring = file.read().replace('\n', '')
+                #cf = CloudFiles(Obj['cloud_bucket']+ '%s/%d/'%(Obj['type_of_shape'],Obj['nucleus_id']),secrets =secretstring)
+                cf = CloudFiles(Obj['cloud_bucket'],secrets =secretstring)
+                
+                cf.put_json(outfile, content=np.squeeze(pred_val))
+                #np.savetxt(outfile,np.squeeze(pred_val))
+                
+                #print (outfile)
+                #features.append(np.squeeze(pred_val))
+
+def eval_one_epoch_cloud_multi(Obj,sess,ops,num_votes=1,topk=1):
+    from multiprocessing import Pool
+    from contextlib import closing
+    is_training = False
+    fout = open(os.path.join(Obj['pointnet_dump_dir'], 'pred_label.txt'), 'w')
+    is_training = False
+    total = len(Obj['pointnet_files'])
+    for r in range(len(Obj['pointnet_files'])):
+        print("%d/%d"%(r,total))
+        myevalfunc(Obj,ops,is_training,sess,r)
+        
+    #with closing( Pool(30) ) as p:
+    #    partial_process = partial(myevalfunc,Obj,ops,is_training,sess)
+    #    rng = range(len(Obj['pointnet_files']))
+    #    p.map(partial_process,rng)
+
+def featureExtractionTask_cell(Obj,cellid,data_synapses):
+    cf = CloudFiles(Obj['cloud_bucket'],secrets =Obj['google_secrets_file'])
+    with open(Obj['google_secrets_file'], 'r') as file:
+        secretstring = file.read().replace('\n', '')
+    client = FrameworkClient(Obj['dataset_name'],auth_token_file=Obj['auth_token_file'])
+    #find all files in google bucket
+    allfiles = []
+    #data_synapses= client.materialize.query_table('synapses_pni_2',filter_in_dict={'post_pt_root_id':['%d'%cellid]}, materialization_version = Obj['materialization_version'])
+    
+    for index,d in data_synapses.iterrows():
+        #print(d.id)
+        #cf = CloudFiles(Obj['cloud_bucket']+ '%s/%d/'%(Obj['type_of_shape'],Obj['nucleus_id']),secrets =secretstring)
+        #file_exists = cf.exists("PSS_%d.h5"%(d.id))
+        #if file_exists:
+            #allfiles.append('%s/%d/PSS_%d.h5'%(Obj['type_of_shape'],Obj['nucleus_id'],d.id))
+        allfiles.append('%s/PSS_%d.h5'%(Obj['type_of_shape'],d.id))
+    print(allfiles)
+    Obj['pointnet_files'] = allfiles
+    tf.reset_default_graph()
+    evaluate_cloud(Obj)
+    tf.reset_default_graph()
+
+def find_closest_component(loc_mesh, x,y,z):
+
+    print(x,y,z)
+    print(np.mean(loc_mesh.vertices,axis=1))    
+    allmeshes = trimesh.graph.split(loc_mesh,only_watertight=False)
+    dist=None
+    besta = None
+    for a in allmeshes:
+        closest, distance, triangle = trimesh.proximity.closest_point(a, np.array([[x*4,y*4,z*40]])) 
+        if (dist is None) :
+            besta =a 
+            dist = np.abs(distance[0])
+        elif  (np.abs(distance[0])< dist) :
+            besta =a 
+            dist = np.abs(distance[0])
+        else:
+            t = 10
+            #print("Nothing changed")
+    return besta
+
+def find_mesh_order(path,vertlabels):
+    pathlabels = []
+    for ip in path:
+        pathlabels.append(vertlabels[ip])
+    
+    unique_path_labels = list(set(pathlabels))
+    pathlabels = list(dict.fromkeys(pathlabels)) #get ordered labels
+    #save_submeshes(allmeshes,pathlabels)
+    return pathlabels
+
+def find_path_skel2synapse_cp(loc_mesh,sk,pt):
+    t = get_indices_of_skeleton_verts(loc_mesh, sk)
+    sk_inds = [val for i,val in enumerate(t) if not val == -1 ]
+    
+    if len(sk_inds) < 1:
+        return None
+    else:
+        closest_point, distance, tid = trimesh.proximity.closest_point(loc_mesh,[[pt[0], pt[1], pt[2] ]]) 
+        
+        pointindex = loc_mesh.faces[tid][0][0]
+
+        dm, preds, sources = sparse.csgraph.dijkstra(
+                        loc_mesh.csgraph, False, [pointindex], 
+                        min_only=True, return_predecessors=True)
+        min_node = np.argmin(dm[sk_inds])
+
+        path = utils.get_path(pointindex, sk_inds[min_node], preds)
+        
+        
+        return path
+
+def findunprocessed_indices(Obj):
+    
+    unproc = []
+    allindices = Obj['rng']
+    
+    if not Obj['forcerun'] :
+        #print("This is allindices: ", allindices)
+        for q in allindices:
+
+            sid = Obj['data_synapses'].iloc[q]['id']
+
+            outfile = Obj['outdir'] + "/PSS_%d_%d.off"%(sid,q)
+
+            if not os.path.exists(outfile):
+                unproc.append(q)
+    else:
+        unproc = allindices
+    return unproc
 
 def get_local_mesh(Obj,synapse_loc,cellid):
     pt = np.array(synapse_loc)
@@ -368,7 +520,6 @@ def get_local_meshbackup(Obj,synapse_loc):
     return mesh
     #return 1
     
-
 def get_local_mesh_imagery(Obj,synapse_loc):
     imageclient=imagery.ImageryClient(framework_client=Obj['client'])
     pt = np.array(synapse_loc)
@@ -464,38 +615,51 @@ def get_segments_for_synapse(Obj, synapse_loc,cellid):
                     
     return allmeshes,vertlabels,loc_mesh,[x,y,z],sdf,seg, large_loc_mesh,postcellid
     #return loc_mesh
-    
-    
-def find_path_skel2synapse_cp(loc_mesh,sk,pt):
-    t = get_indices_of_skeleton_verts(loc_mesh, sk)
-    sk_inds = [val for i,val in enumerate(t) if not val == -1 ]
-    
-    if len(sk_inds) < 1:
-        return None
-    else:
-        closest_point, distance, tid = trimesh.proximity.closest_point(loc_mesh,[[pt[0], pt[1], pt[2] ]]) 
-        
-        pointindex = loc_mesh.faces[tid][0][0]
 
-        dm, preds, sources = sparse.csgraph.dijkstra(
-                        loc_mesh.csgraph, False, [pointindex], 
-                        min_only=True, return_predecessors=True)
-        min_node = np.argmin(dm[sk_inds])
+def get_indices_of_skeleton_verts(mesh, sk):
+    mv = mesh.vertices
+    sv = sk.vertices
+    mvl = np.ndarray.tolist(mv)
+    indices = []
+    for s in sv:
+        if s in mv:
+            indices.append(getind(mvl, s))
+    return indices
 
-        path = utils.get_path(pointindex, sk_inds[min_node], preds)
-        
-        
-        return path
+def getind(vertexlist, point):
+    for i in range(0, len(vertexlist)):
+        if( (point[0] == vertexlist[i][0]) & (point[1] == vertexlist[i][1]) & (point[2] == vertexlist[i][2])  ):
+            return i
+    return -1
 
-def find_mesh_order(path,vertlabels):
-    pathlabels = []
-    for ip in path:
-        pathlabels.append(vertlabels[ip])
+def get_mesh(centerpoint, cutout_radius,  segid, bounds, mip, imageclient):
+    seg_cutout = imageclient.segmentation_cutout(bounds,mip=mip,root_ids=[segid])
+    seg_cutout = np.squeeze(seg_cutout)
+    mask = seg_cutout == segid
+    mask = np.squeeze(mask)
+    mesh = get_trimesh_from_segmask(mask,centerpoint, cutout_radius, mip, imageclient)
+    return mesh
+
+def get_trimesh_from_segmask(seg_mask, og_cm, cutout_radius, mip, imageclient):
     
-    unique_path_labels = list(set(pathlabels))
-    pathlabels = list(dict.fromkeys(pathlabels)) #get ordered labels
-    #save_submeshes(allmeshes,pathlabels)
-    return pathlabels
+    mip_resolution = imageclient.segmentation_cv.mip_resolution(mip)
+    spacing_nm = mip_resolution
+    seg_image_data = image_data_from_vol_numpy((255*seg_mask).astype(np.uint8),
+                                        spacing = spacing_nm, origin=og_cm-cutout_radius)
+
+    surface =vtk.vtkMarchingCubes()
+    surface.SetInputData(seg_image_data)
+    surface.ComputeScalarsOff()
+    surface.ComputeNormalsOn()
+    surface.SetValue(0, 128)
+    surface.Update()
+
+    points, tris, edges = trimesh_vtk.poly_to_mesh_components(surface.GetOutput())
+    new_mesh = trimesh_io.Mesh(points, tris)
+    is_big = mesh_filters.filter_largest_component(new_mesh)
+    new_mesh = new_mesh.apply_mask(is_big)
+
+    return new_mesh
 
 def get_indices_of_path(loc_mesh, mesh, point_inds):
     mv =mesh.vertices
@@ -506,49 +670,6 @@ def get_indices_of_path(loc_mesh, mesh, point_inds):
         if point in mv:
             indices.append(p)
     return indices
-
-def calculate_sdf(mesh_filt):
-    ray_inter = ray_pyembree.RayMeshIntersector(mesh_filt)
-    # The first argument below sets the origin of the ray, and I use
-    # the vertex normal to move the origin slightly so it doesn't hit at the initial vertex point
-    # and I can set multiple hits to False
-
-    # The first argument below sets the origin of the ray, and I use
-    # the vertex normal to move the origin slightly so it doesn't hit at the initial vertex point
-    # and I can set multiple hits to False
-
-    rs = np.zeros(len(mesh_filt.vertices))
-    good_rs = np.full(len(rs), False)
-
-    itr = 0
-    while not np.all(good_rs):
-        
-        blank_inds = np.where(~good_rs)[0]
-        starts = (mesh_filt.vertices-mesh_filt.vertex_normals)[~good_rs,:]
-        vs = (-mesh_filt.vertex_normals+0.001*np.random.rand(*mesh_filt.vertex_normals.shape))[~good_rs,:]
-
-        rtrace = ray_inter.intersects_location(starts, vs, multiple_hits=False)
-        # radius values
-        if len(rtrace[0])>0:
-            rs[blank_inds[rtrace[1]]] = np.linalg.norm(mesh_filt.vertices[rtrace[1]]-rtrace[0], axis=1)
-            good_rs[blank_inds[rtrace[1]]]=True
-        itr+=1
-        if itr>10:
-            break
-    return rs
-
-def myprocessingfunctest(Obj,l,q):
-    #print ("%d out of %d "%(q,l))
-    sc = Obj['synapse_scale'] 
-    s = [sc[0]*Obj['data_synapses'].iloc[q]['ctr_pt_position'][0], sc[1]*Obj['data_synapses'].iloc[q]['ctr_pt_position'][1], sc[2]*Obj['data_synapses'].iloc[q]['ctr_pt_position'][2]]
-    
-    #print("synapse: ", s)
-    #loc_mesh = get_segments_for_synapse(Obj,s)
-    allmeshes, vertlabels,loc_mesh,pt,sdf,seg,postcellid = get_segments_for_synapse(Obj,s)
-    
-    #sk = skeletonize.skeletonize_mesh(loc_mesh)
-    return loc_mesh
-
 
 def get_synapse_and_scaled_versions(Obj, q):
     sc = Obj['synapse_scale'] 
@@ -612,6 +733,250 @@ def get_distance_to_center(Obj,cellid,s_nm):
             Obj["mesh_bounds"] = [300,300,300]
     
     return dist_to_center, Obj["mesh_bounds"]
+
+def get_PSS_from_locmesh(pt,s,loc_mesh,dist_to_center,sdf,seg,vertlabels,allmeshes,cellid,Obj,large_loc_mesh):
+    
+    time_start = time.time()
+    csg = loc_mesh._create_csgraph()
+    ccs = sparse.csgraph.connected_components(csg)
+    ccs_u, cc_sizes = np.unique(ccs[1], return_counts=True)
+    large_cc_ids = ccs_u[cc_sizes > 20] # large components in local mesh
+    etime = time.time()-time_start
+
+    if (dist_to_center < 15000) & (np.max(cc_sizes) >5000): # soma if its close to the nucleus and component is large
+        spinemesh = create_closest_submesh(loc_mesh,seg,pt[0],pt[1],pt[2])
+        sk = None
+
+    else: #dendrite
+        #print("dendrite")
+        
+        #get large loc_mesh
+        Obj['mesh_bounds'] = [500,500,500]
+        #large_loc_mesh = get_local_mesh(Obj,np.array(s),cellid)
+        sk = skeletonize.skeletonize_mesh(large_loc_mesh)
+
+        try:
+
+            path = find_path_skel2synapse_cp(loc_mesh,sk,pt)
+
+        except:
+            path = None
+
+
+        if path is None:
+
+            spinemesh = create_closest_submesh(loc_mesh,seg,pt[0],pt[1],pt[2])
+        else:
+
+
+            start_time = time.time()
+            pathlabels = find_mesh_order(path,vertlabels)
+
+            if len(pathlabels) > 1: #only cases with more than one segment (those will be either good ones or shafts)
+
+                sdf_verts = assign_labels_to_verts(loc_mesh,sdf)
+                sdf_mean = []
+                for ind in range(0,len(pathlabels)):
+                    lastmesh = allmeshes[pathlabels[ind]][0]
+                    t1 = get_indices_of_path(loc_mesh, lastmesh, path)
+                    sdfvec = [sdf_verts[t] for t in t1]
+                    sdf_mean.append(np.mean(sdfvec))
+
+                if sdf_mean[-1] > sdf_mean[-2]:
+
+                    pathlabels = pathlabels[:-1]
+            spinemeshes = [allmeshes[p] for p in pathlabels ]
+
+            spinemesh = trimesh.util.concatenate(spinemeshes)
+
+            elapsed_time = time.time() - start_time
+            
+    return spinemesh,sk
+
+def insert_into_PSS_table(synid, pss_vector, cellid, credentials_path):
+    #credentials_path = '/Users/sharmishtaas/Documents/code/testBigQuery/exalted-beanbag-334502-1a080bb80b37.json'
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
+
+    # Construct a BigQuery client object.
+    client = bigquery.Client()
+
+
+    sql = """
+    select * from  exalted-beanbag-334502.TestDataSet.PSSTable
+    where SynapseID = %d
+    """%synid
+
+    query_job = client.query(sql)  
+    numrows = query_job.result().total_rows
+    print("This is numrows before insert ",numrows)
+    print(type(synid))
+    print(type(cellid))
+    print(type(pss_vector))
+    print(type(pss_vector[0]))
+    
+    table_id = "exalted-beanbag-334502.TestDataSet.PSSTable"
+
+    rows_to_insert = [
+        {u"SynapseID": synid, u"PSSVec": pss_vector,  u"pt_root_id": int(cellid)}
+    ]
+
+    #table_id = "exalted-beanbag-334502.TestDataSet.MyNewTable"
+
+    #rows_to_insert = [
+    #    {"SynapseID": synid, "pt_root_id": cellid}
+    #]
+
+    print("Before inserting")
+    errors = client.insert_rows_json(table_id, rows_to_insert)  # Make an API request.
+
+    print("After inserting")
+    if errors == []:
+        print("New rows have been added.")
+    else:
+        print("Encountered errors while inserting rows: {}".format(errors))
+
+def image_data_from_vol_numpy(arr, spacing=[1,1,1], origin=[0,0,0]):
+    #da=trimesh_vtk.numpy_to_vtk(arr.ravel()) #.ravel returns a contiguous flattened array
+    
+    da = trimesh_vtk.numpy_to_vtk(np.ravel(arr,order='F'))
+    image_data = vtk.vtkImageData()
+    image_data.SetDimensions(arr.shape)
+    image_data.SetExtent(0, arr.shape[0]-1, 0,
+                           arr.shape[1]-1, 0, arr.shape[2]-1)
+    #assumes 1,1 spacing.
+    image_data.SetSpacing(spacing)
+    image_data.SetOrigin(origin)
+    image_data.GetPointData().SetScalars(da)
+    
+    return image_data
+
+    
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            
+        
+
+
+
+
+
+            
+
+
+
+    
+
+   
+
+    
+
+
+def log_string(Obj,out_str):
+    Obj['LOG_FOUT'].write(out_str+'\n')
+    Obj['LOG_FOUT'].flush()
+    #print(out_str)
+
+def loadCloudH5File(Obj,filename,num_points):
+    
+    #read mesh
+    try:
+        cloudbucket = Obj['cloud_bucket']
+        with open(Obj['google_secrets_file'], 'r') as file:
+            secretstring = file.read().replace('\n', '')
+        cf = CloudFiles(cloudbucket,secrets =secretstring)
+        f = io.BytesIO(cf.get(filename))
+        hf = h5py.File(f, 'r')
+        vertices= np.array(hf.get('vertices'))
+        faces = np.array(hf.get('faces'))
+        numvertices = len(vertices)
+        if (numvertices > -100):
+            m = trimesh.Trimesh(vertices,faces)
+
+            cm = np.mean(m.vertices,axis=0)
+
+            m.vertices = m.vertices-cm
+
+            m.vertices = rotate_to_principal_component(m.vertices)
+
+            vertices, fi = trimesh.sample.sample_surface(m,num_points)
+
+            vertices = np.expand_dims(vertices, axis=0)
+            labels = np.ndarray([1])
+            return (vertices,labels)
+        else:
+            return None,None
+    except:
+        return None,None
+   
+def loadfeatures(feat_files):
+    features = []
+    #synapse_distances = []
+    index = 0
+    for f in feat_files:
+        index += 1
+        v = np.loadtxt(f)
+        features.append(v)
+        #curdistfilename = f.replace('ae_model_v2.txt','distance.txt')
+        #synapse_distances.append(np.loadtxt(curdistfilename))
+    return features
+
+def myprocessingfunctest(Obj,l,q):
+    #print ("%d out of %d "%(q,l))
+    sc = Obj['synapse_scale'] 
+    s = [sc[0]*Obj['data_synapses'].iloc[q]['ctr_pt_position'][0], sc[1]*Obj['data_synapses'].iloc[q]['ctr_pt_position'][1], sc[2]*Obj['data_synapses'].iloc[q]['ctr_pt_position'][2]]
+    
+    #print("synapse: ", s)
+    #loc_mesh = get_segments_for_synapse(Obj,s)
+    allmeshes, vertlabels,loc_mesh,pt,sdf,seg,postcellid = get_segments_for_synapse(Obj,s)
+    
+    #sk = skeletonize.skeletonize_mesh(loc_mesh)
+    return loc_mesh
+
+def myParallelTasks(Obj):
+    l = len(Obj['rng'])
+    
+    index = 0
+    while index < 3:
+        unprocessed_inds = findunprocessed_indices(Obj)
+        tq = LocalTaskQueue(parallel=10) # use 5 processes
+        #tasks = ( partial(print_task, i) for i in range(2000) ) # NEW SCHOOL
+        tasks = (partial(myprocessingTask,Obj,l,q) for q in unprocessed_inds)
+        tq.insert_all(tasks) # performs on-line execution (naming is historical)
+        index +=1
+    
+def myParallelProcess_old(Obj):
+ l = len(Obj['rng'])
+ from multiprocessing import Pool
+ from contextlib import closing
+ with closing( Pool(45) ) as p:
+    partial_process = partial(myprocessingfunc,Obj,l)
+    rng = Obj['rng']
+    p.map(partial_process,rng)
+    
+def myParallelProcess(Obj):
+     l = len(Obj['rng'])
+     from multiprocessing import Process
+     procs = []
+     for i in Obj['rng']:
+        proc = Process(target=myprocessingfunc, args=(Obj,l,i))
+        proc.start()
+        
+     # complete the processes
+     for proc in procs:
+        proc.join()
 
 def myprocessingfunc_old(Obj,l,q):
     
@@ -708,64 +1073,64 @@ def myprocessingfunc_old(Obj,l,q):
     print(type(obj))
     return obj
 
-def get_PSS_from_locmesh(pt,s,loc_mesh,dist_to_center,sdf,seg,vertlabels,allmeshes,cellid,Obj,large_loc_mesh):
+def myprocessingfunc(Obj,l,q):
     
-    time_start = time.time()
-    csg = loc_mesh._create_csgraph()
-    ccs = sparse.csgraph.connected_components(csg)
-    ccs_u, cc_sizes = np.unique(ccs[1], return_counts=True)
-    large_cc_ids = ccs_u[cc_sizes > 20] # large components in local mesh
-    etime = time.time()-time_start
-
-    if (dist_to_center < 15000) & (np.max(cc_sizes) >5000): # soma if its close to the nucleus and component is large
-        spinemesh = create_closest_submesh(loc_mesh,seg,pt[0],pt[1],pt[2])
-        sk = None
-
-    else: #dendrite
-        #print("dendrite")
+    synapse_id = Obj['data_synapses'].iloc[q]['id']
+    outputspinefile = Obj['outdir'] + "/PSS_%d_%d.off"%(synapse_id,q)
+    outputlocmeshfile = Obj['outdir'] + "/locmeshPSS_%d_%d.off"%(synapse_id,q)
+    
+    spinemesh = None
+    loc_mesh = None
+    sk = None
+    pt = None
+    
+    #print("This is forcerun: ", Obj['forcerun'])
+    if (not os.path.exists(outputspinefile)) | (Obj['forcerun'] == True):
+    
+        #print ("%d out of %d "%(q,l))
+        #print(Obj['data_synapses'].shape)       
         
-        #get large loc_mesh
-        Obj['mesh_bounds'] = [500,500,500]
-        #large_loc_mesh = get_local_mesh(Obj,np.array(s),cellid)
-        sk = skeletonize.skeletonize_mesh(large_loc_mesh)
+        s, pt = get_synapse_and_scaled_versions(Obj, q)
+        cellid = Obj['data_synapses'].iloc[q]['post_pt_root_id']   
+        dist_to_center,Obj['mesh_bounds'] = get_distance_to_center(Obj,cellid,pt)  
+        allmeshes, vertlabels,loc_mesh,other_pt,sdf,seg = get_segments_for_synapse(Obj,s,cellid)
+        
+        if allmeshes is not None:
+        
+            #print("Dist to center", dist_to_center)
 
-        try:
+            if dist_to_center < 0: #lone segment 
 
-            path = find_path_skel2synapse_cp(loc_mesh,sk,pt)
+                spinemesh = create_closest_submesh(loc_mesh,seg,pt[0],pt[1],pt[2])
 
-        except:
-            path = None
+            else:
+                
+                spinemesh,sk = get_PSS_from_locmesh(pt,s,loc_mesh,dist_to_center,sdf,seg,vertlabels,allmeshes,cellid,Obj)
 
-
-        if path is None:
-
-            spinemesh = create_closest_submesh(loc_mesh,seg,pt[0],pt[1],pt[2])
-        else:
-
-
-            start_time = time.time()
-            pathlabels = find_mesh_order(path,vertlabels)
-
-            if len(pathlabels) > 1: #only cases with more than one segment (those will be either good ones or shafts)
-
-                sdf_verts = assign_labels_to_verts(loc_mesh,sdf)
-                sdf_mean = []
-                for ind in range(0,len(pathlabels)):
-                    lastmesh = allmeshes[pathlabels[ind]][0]
-                    t1 = get_indices_of_path(loc_mesh, lastmesh, path)
-                    sdfvec = [sdf_verts[t] for t in t1]
-                    sdf_mean.append(np.mean(sdfvec))
-
-                if sdf_mean[-1] > sdf_mean[-2]:
-
-                    pathlabels = pathlabels[:-1]
-            spinemeshes = [allmeshes[p] for p in pathlabels ]
-
-            spinemesh = trimesh.util.concatenate(spinemeshes)
-
-            elapsed_time = time.time() - start_time
+            synapse_id = Obj['data_synapses'].iloc[q]['id']
+            #print("outputting")
+            trimesh.exchange.export.export_mesh(spinemesh, Obj['outdir'] + "/PSS_%d_%d.off"%(synapse_id,q))
+            trimesh.exchange.export.export_mesh(loc_mesh, Obj['outdir'] + "/locmeshPSS_%d_%d.off"%(synapse_id,q))
+            #cf = CloudFiles(Obj['cloud_bucket'],secrets ='/usr/local/featureExtractionParty/googleservice.json')
+            #bio = io.BytesIO()
+            #with h5py.File(bio, "w") as f:
+            #    f.create_dataset("vertices", data=spinemesh.vertices, compression="gzip")
+            #    f.create_dataset("faces", data=spinemesh.faces, compression="gzip")
             
-    return spinemesh,sk
+            #cf.put("PSS_%d_%d.h5"%(synapse_id,q), content=bio.getvalue(), content_type="application/x-hdf5", compress=None, cache_control=None)
+            
+            
+        else:
+            print("allmeshes in none!!!!!!!!")
+
+    #print("Setting up obj")
+    obj = {}
+    obj['spinemesh'] = spinemesh
+    obj['loc_mesh'] = loc_mesh
+    obj['skeleton'] = sk
+    obj['pt'] = pt
+    
+    return obj
 
 @queueable
 def myprocessingTask(Obj,l,q):
@@ -831,8 +1196,6 @@ def myprocessingTask(Obj,l,q):
     obj['pt'] = pt
     
     return obj
-
-
 
 @queueable
 def myprocessingTask_synapseid(Obj,synapse_id,cellid):
@@ -909,9 +1272,6 @@ def myprocessingTask_synapseid(Obj,synapse_id,cellid):
             del(seg)
             del(sk)
     del(Obj)
-
-
-
 
 @queueable
 def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
@@ -1028,100 +1388,6 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
     else:
         print("Record already exists")
 
-            
-        
-def update_synapses(data_synapses,cell_center_of_mass,threshold):
-    dists = np.linalg.norm((np.stack(data_synapses.ctr_pt_position.values) - cell_center_of_mass ) * [4,4,40], axis=1)
-    data_synapses['dists'] = dists
-    return data_synapses[ data_synapses['dists'] < threshold]
-
-
-
-
-def featureExtractionTask_cell(Obj,cellid,data_synapses):
-    cf = CloudFiles(Obj['cloud_bucket'],secrets =Obj['google_secrets_file'])
-    with open(Obj['google_secrets_file'], 'r') as file:
-        secretstring = file.read().replace('\n', '')
-    client = FrameworkClient(Obj['dataset_name'],auth_token_file=Obj['auth_token_file'])
-    #find all files in google bucket
-    allfiles = []
-    #data_synapses= client.materialize.query_table('synapses_pni_2',filter_in_dict={'post_pt_root_id':['%d'%cellid]}, materialization_version = Obj['materialization_version'])
-    
-    for index,d in data_synapses.iterrows():
-        #print(d.id)
-        #cf = CloudFiles(Obj['cloud_bucket']+ '%s/%d/'%(Obj['type_of_shape'],Obj['nucleus_id']),secrets =secretstring)
-        #file_exists = cf.exists("PSS_%d.h5"%(d.id))
-        #if file_exists:
-            #allfiles.append('%s/%d/PSS_%d.h5'%(Obj['type_of_shape'],Obj['nucleus_id'],d.id))
-        allfiles.append('%s/PSS_%d.h5'%(Obj['type_of_shape'],d.id))
-    print(allfiles)
-    Obj['pointnet_files'] = allfiles
-    tf.reset_default_graph()
-    evaluate_cloud(Obj)
-    tf.reset_default_graph()
-            
-
-
-
-    
-def myprocessingfunc(Obj,l,q):
-    
-    synapse_id = Obj['data_synapses'].iloc[q]['id']
-    outputspinefile = Obj['outdir'] + "/PSS_%d_%d.off"%(synapse_id,q)
-    outputlocmeshfile = Obj['outdir'] + "/locmeshPSS_%d_%d.off"%(synapse_id,q)
-    
-    spinemesh = None
-    loc_mesh = None
-    sk = None
-    pt = None
-    
-    #print("This is forcerun: ", Obj['forcerun'])
-    if (not os.path.exists(outputspinefile)) | (Obj['forcerun'] == True):
-    
-        #print ("%d out of %d "%(q,l))
-        #print(Obj['data_synapses'].shape)       
-        
-        s, pt = get_synapse_and_scaled_versions(Obj, q)
-        cellid = Obj['data_synapses'].iloc[q]['post_pt_root_id']   
-        dist_to_center,Obj['mesh_bounds'] = get_distance_to_center(Obj,cellid,pt)  
-        allmeshes, vertlabels,loc_mesh,other_pt,sdf,seg = get_segments_for_synapse(Obj,s,cellid)
-        
-        if allmeshes is not None:
-        
-            #print("Dist to center", dist_to_center)
-
-            if dist_to_center < 0: #lone segment 
-
-                spinemesh = create_closest_submesh(loc_mesh,seg,pt[0],pt[1],pt[2])
-
-            else:
-                
-                spinemesh,sk = get_PSS_from_locmesh(pt,s,loc_mesh,dist_to_center,sdf,seg,vertlabels,allmeshes,cellid,Obj)
-
-            synapse_id = Obj['data_synapses'].iloc[q]['id']
-            #print("outputting")
-            trimesh.exchange.export.export_mesh(spinemesh, Obj['outdir'] + "/PSS_%d_%d.off"%(synapse_id,q))
-            trimesh.exchange.export.export_mesh(loc_mesh, Obj['outdir'] + "/locmeshPSS_%d_%d.off"%(synapse_id,q))
-            #cf = CloudFiles(Obj['cloud_bucket'],secrets ='/usr/local/featureExtractionParty/googleservice.json')
-            #bio = io.BytesIO()
-            #with h5py.File(bio, "w") as f:
-            #    f.create_dataset("vertices", data=spinemesh.vertices, compression="gzip")
-            #    f.create_dataset("faces", data=spinemesh.faces, compression="gzip")
-            
-            #cf.put("PSS_%d_%d.h5"%(synapse_id,q), content=bio.getvalue(), content_type="application/x-hdf5", compress=None, cache_control=None)
-            
-            
-        else:
-            print("allmeshes in none!!!!!!!!")
-
-    #print("Setting up obj")
-    obj = {}
-    obj['spinemesh'] = spinemesh
-    obj['loc_mesh'] = loc_mesh
-    obj['skeleton'] = sk
-    obj['pt'] = pt
-    
-    return obj
 
 def mySerialProcess(Obj):
  l = len(Obj['rng'])
@@ -1133,144 +1399,6 @@ def mySerialProcess(Obj):
         #except: 
             #print("Skipping synapse ", i)
  return obj   
-   
-def findunprocessed_indices(Obj):
-    
-    unproc = []
-    allindices = Obj['rng']
-    
-    if not Obj['forcerun'] :
-        #print("This is allindices: ", allindices)
-        for q in allindices:
-
-            sid = Obj['data_synapses'].iloc[q]['id']
-
-            outfile = Obj['outdir'] + "/PSS_%d_%d.off"%(sid,q)
-
-            if not os.path.exists(outfile):
-                unproc.append(q)
-    else:
-        unproc = allindices
-    return unproc
-    
-def myParallelTasks(Obj):
-    l = len(Obj['rng'])
-    
-    index = 0
-    while index < 3:
-        unprocessed_inds = findunprocessed_indices(Obj)
-        tq = LocalTaskQueue(parallel=10) # use 5 processes
-        #tasks = ( partial(print_task, i) for i in range(2000) ) # NEW SCHOOL
-        tasks = (partial(myprocessingTask,Obj,l,q) for q in unprocessed_inds)
-        tq.insert_all(tasks) # performs on-line execution (naming is historical)
-        index +=1
-    
-def myParallelProcess_old(Obj):
- l = len(Obj['rng'])
- from multiprocessing import Pool
- from contextlib import closing
- with closing( Pool(45) ) as p:
-    partial_process = partial(myprocessingfunc,Obj,l)
-    rng = Obj['rng']
-    p.map(partial_process,rng)
-    
-def myParallelProcess(Obj):
-     l = len(Obj['rng'])
-     from multiprocessing import Process
-     procs = []
-     for i in Obj['rng']:
-        proc = Process(target=myprocessingfunc, args=(Obj,l,i))
-        proc.start()
-        
-     # complete the processes
-     for proc in procs:
-        proc.join()
-
-def log_string(Obj,out_str):
-    Obj['LOG_FOUT'].write(out_str+'\n')
-    Obj['LOG_FOUT'].flush()
-    #print(out_str)
-    
-
-def evaluate(Obj, num_votes=1):
-    is_training = False
-     
-    with tf.device('/gpu:'+str(Obj['pointnet_GPU_INDEX'])):
-        
-        pointclouds_pl, labels_pl = Obj['tensorflow_model'].placeholder_inputs(Obj['pointnet_batch_size'], Obj['pointnet_num_points'])
-        #print(pointclouds_pl.shape)
-        is_training_pl = tf.placeholder(tf.bool, shape=())
-        labels_pl_rep = tf.placeholder(tf.float32,shape=(1))
-
-        # simple model
-        pred, end_points = Obj['tensorflow_model'].get_model(pointclouds_pl, is_training_pl)
-       #print("Size of embedding")
-        #print(pred.shape)
-        
-        # Add ops to save and restore all the variables.
-        saver = tf.train.Saver()
-        
-    # Create a session
-    config = tf.ConfigProto()
-    config.gpu_options.allow_growth = True
-    config.allow_soft_placement = True
-    config.log_device_placement = True
-    sess = tf.Session(config=config)
-
-    # Restore variables from disk.
-    saver.restore(sess, Obj['pointnet_model_path'])
-    log_string(Obj,"Model restored.")
-
-    ops = {'pointclouds_pl': pointclouds_pl,
-           'labels_pl': labels_pl_rep,
-           'is_training_pl': is_training_pl,
-           'pred': pred,
-           'embedding': end_points['embedding']
-           }
-    eval_one_epoch(Obj, sess, ops, num_votes)
-    #features,files = eval_one_epoch(FILES, sess, ops, num_votes)
-    #features = np.array(features)
-    #return features,files
-    
-def evaluate_cloud(Obj, num_votes=1):
-    is_training = False
-     
-    with tf.device('/gpu:'+str(Obj['pointnet_GPU_INDEX'])):
-        
-        pointclouds_pl, labels_pl = Obj['tensorflow_model'].placeholder_inputs(Obj['pointnet_batch_size'], Obj['pointnet_num_points'])
-        #print(pointclouds_pl.shape)
-        is_training_pl = tf.placeholder(tf.bool, shape=())
-        labels_pl_rep = tf.placeholder(tf.float32,shape=(1))
-
-        # simple model
-        pred, end_points = Obj['tensorflow_model'].get_model(pointclouds_pl, is_training_pl)
-       #print("Size of embedding")
-        #print(pred.shape)
-        
-        # Add ops to save and restore all the variables.
-        saver = tf.train.Saver()
-        
-    # Create a session
-    config = tf.ConfigProto()
-    config.gpu_options.allow_growth = True
-    config.allow_soft_placement = True
-    config.log_device_placement = True
-    sess = tf.Session(config=config)
-
-    # Restore variables from disk.
-    saver.restore(sess, Obj['pointnet_model_path'])
-    log_string(Obj,"Model restored.")
-
-    ops = {'pointclouds_pl': pointclouds_pl,
-           'labels_pl': labels_pl_rep,
-           'is_training_pl': is_training_pl,
-           'pred': pred,
-           'embedding': end_points['embedding']
-           }
-    eval_one_epoch_cloud_multi(Obj, sess, ops, num_votes)
-    #features,files = eval_one_epoch(FILES, sess, ops, num_votes)
-    #features = np.array(features)
-    #return features,files
 
 def myevalfunc(Obj, ops,is_training, sess,fn):
     log_string(Obj,'----'+str(fn)+'----')
@@ -1295,58 +1423,29 @@ def myevalfunc(Obj, ops,is_training, sess,fn):
         cf = CloudFiles(Obj['cloud_bucket'],secrets =secretstring)
 
         cf.put_json(outfile, content=np.squeeze(pred_val))
-        
 
+def reduce_features_spines(features):
+    #print("Length of features: ")
+    #print(features.shape)
+    #print(type(features))
     
-def eval_one_epoch_cloud_multi(Obj,sess,ops,num_votes=1,topk=1):
-    from multiprocessing import Pool
-    from contextlib import closing
-    is_training = False
-    fout = open(os.path.join(Obj['pointnet_dump_dir'], 'pred_label.txt'), 'w')
-    is_training = False
-    total = len(Obj['pointnet_files'])
-    for r in range(len(Obj['pointnet_files'])):
-        print("%d/%d"%(r,total))
-        myevalfunc(Obj,ops,is_training,sess,r)
-        
-    #with closing( Pool(30) ) as p:
-    #    partial_process = partial(myevalfunc,Obj,ops,is_training,sess)
-    #    rng = range(len(Obj['pointnet_files']))
-    #    p.map(partial_process,rng)
-        
-def eval_one_epoch_cloud(Obj, sess, ops, num_votes=1, topk=1):
     
-    is_training = False
-    fout = open(os.path.join(Obj['pointnet_dump_dir'], 'pred_label.txt'), 'w')
-    for fn in range(len(Obj['pointnet_files'])):
-        outfile = Obj['pointnet_files'][fn].replace(".h5","_ae_model_manualV3.json")
-        outfile = outfile.replace("PSS", "features/PSS")
-        
-        #if (not os.path.exists(outfile)) | (Obj['forcecreatefeatures'] == True):
-        if 1 ==1:
-            log_string(Obj,'----'+str(fn)+'----')
-            #print(Obj['pointnet_files'][fn])
-            
-            current_data,current_label = loadCloudH5File(Obj,Obj['pointnet_files'][fn], Obj['pointnet_num_points'])
-            if current_data is not None:
-                feed_dict = {ops['pointclouds_pl']: current_data,
-                                     ops['labels_pl']: current_label,
-                                     ops['is_training_pl']: is_training}
-                pred_val = sess.run([ops['embedding']], feed_dict=feed_dict)
-                #pred_val = sess.run([ops['pred']], feed_dict=feed_dict)
+    reducer = umap.UMAP(random_state=20,n_neighbors=20)
+    embedding = reducer.fit_transform(features)
+    return embedding,reducer
 
-                
-                cf = CloudFiles(Obj['cloud_bucket'],secrets =Obj['google_secrets_file'])
-                with open(Obj['google_secrets_file'], 'r') as file:
-                    secretstring = file.read().replace('\n', '')
-                #cf = CloudFiles(Obj['cloud_bucket']+ '%s/%d/'%(Obj['type_of_shape'],Obj['nucleus_id']),secrets =secretstring)
-                cf = CloudFiles(Obj['cloud_bucket'],secrets =secretstring)
-                
-                cf.put_json(outfile, content=np.squeeze(pred_val))
-                #np.savetxt(outfile,np.squeeze(pred_val))
-                
-                #print (outfile)
-                #features.append(np.squeeze(pred_val))
+def remove_bad_faces (mesh):
+    allfaces = []
+    for f in  mesh.faces:
+        if f[0] == f[1]:
+            x=1
+        elif (f[1] == f[2]):
+            x=1
+        elif f[0] == f[2]:
+            x=1
+        else:
+            allfaces.append(list(f))
+    return np.array(allfaces)
 
 def rotate_to_principal_component(vertices):
     pca = decomposition.PCA(n_components=3)
@@ -1371,110 +1470,34 @@ def rotation_matrix_from_vectors(vec1, vec2):
     rotation_matrix = np.eye(3) + kmat + kmat.dot(kmat) * ((1 - c) / (s ** 2))
     return rotation_matrix
 
-def create_data(Obj,m,num_points):
-        #read mesh
-    try:
-        numvertices = len(m.vertices)
-        if (numvertices > -100):
-            #m = trimesh.Trimesh(vertices,faces)
+def savedebugmesh(mesh):
+    trimesh.exchange.export.export_mesh(mesh,"test.off")
 
-            cm = np.mean(m.vertices,axis=0)
-
-            m.vertices = m.vertices-cm
-
-            m.vertices = rotate_to_principal_component(m.vertices)
-
-            vertices, fi = trimesh.sample.sample_surface(m,num_points)
-
-            vertices = np.expand_dims(vertices, axis=0)
-            labels = np.ndarray([1])
-            return (vertices,labels)
-        else:
-            return None,None
-    except:
-        return None,None
+def save_submeshes(submeshes,inds):
     
+    for i,ind in enumerate(inds):
+        trimesh.exchange.export.export_mesh(submeshes[ind][0], "debug/pathspine_%d_%d.off"%(ind,i)) 
 
+def update_synapses(data_synapses,cell_center_of_mass,threshold):
+    '''
+    Given a dataframe containing synapses, the cell center of mass and a threshold 
+    for distance from the center of mass, find all synapses within this radius and
+    return them.
 
-def loadCloudH5File(Obj,filename,num_points):
+    Parameters
+    ----------
+    data_synapses: pandas.DataFrame
+          Dataframe containing synapse ids and all the information for a synapse
+    cell_center_of_mass: numpy.array
+          3x1 numpy array for the coordinates of the center of mass of the nucleus of the cell
+    threshold : int
+          Value specifying radius within which to filter synapses
     
-    #read mesh
-    try:
-        cloudbucket = Obj['cloud_bucket']
-        with open(Obj['google_secrets_file'], 'r') as file:
-            secretstring = file.read().replace('\n', '')
-        cf = CloudFiles(cloudbucket,secrets =secretstring)
-        f = io.BytesIO(cf.get(filename))
-        hf = h5py.File(f, 'r')
-        vertices= np.array(hf.get('vertices'))
-        faces = np.array(hf.get('faces'))
-        numvertices = len(vertices)
-        if (numvertices > -100):
-            m = trimesh.Trimesh(vertices,faces)
-
-            cm = np.mean(m.vertices,axis=0)
-
-            m.vertices = m.vertices-cm
-
-            m.vertices = rotate_to_principal_component(m.vertices)
-
-            vertices, fi = trimesh.sample.sample_surface(m,num_points)
-
-            vertices = np.expand_dims(vertices, axis=0)
-            labels = np.ndarray([1])
-            return (vertices,labels)
-        else:
-            return None,None
-    except:
-        return None,None
-def eval_one_epoch(Obj, sess, ops, num_votes=1, topk=1):
-    features = []
-    filenames = []
-    
-    is_training = False
-    fout = open(os.path.join(Obj['pointnet_dump_dir'], 'pred_label.txt'), 'w')
-    for fn in range(len(Obj['pointnet_files'])):
-        outfile = Obj['pointnet_files'][fn].replace(".h5","_ae_model_manualV3.txt")
-        if (not os.path.exists(outfile)) | (Obj['forcecreatefeatures'] == True):
-        #if 1 ==1:
-            log_string(Obj,'----'+str(fn)+'----')
-            #print(Obj['pointnet_files'][fn])
-            current_data, current_label = provider.loadAllOffDataFile(Obj['pointnet_files'][fn], Obj['pointnet_num_points'])
-            #current_data,current_label = loadCloudH5File(Obj,Obj['pointnet_files'][fn], Obj['pointnet_num_points'])
-            if current_data is not None:
-                feed_dict = {ops['pointclouds_pl']: current_data,
-                                     ops['labels_pl']: current_label,
-                                     ops['is_training_pl']: is_training}
-                pred_val = sess.run([ops['embedding']], feed_dict=feed_dict)
-                
-                np.savetxt(outfile,np.squeeze(pred_val))
-                
-                
-    
-def loadfeatures(feat_files):
-    features = []
-    #synapse_distances = []
-    index = 0
-    for f in feat_files:
-        index += 1
-        v = np.loadtxt(f)
-        features.append(v)
-        #curdistfilename = f.replace('ae_model_v2.txt','distance.txt')
-        #synapse_distances.append(np.loadtxt(curdistfilename))
-    return features
-
-def dist2pt (features, pt):
-    features = np.array(features)
-    pt = np.array(pt)
-    dists = np.linalg.norm(features-pt[np.newaxis,:],axis=1) 
-    return np.argmin(dists,axis=0)  
- 
-def reduce_features_spines(features):
-    #print("Length of features: ")
-    #print(features.shape)
-    #print(type(features))
-    
-    
-    reducer = umap.UMAP(random_state=20,n_neighbors=20)
-    embedding = reducer.fit_transform(features)
-    return embedding,reducer
+    Returns
+    -------
+    data_synapses: pandas.DataFrame
+          Dataframe containing only synapses within the threshold radius
+    '''
+    dists = np.linalg.norm((np.stack(data_synapses.ctr_pt_position.values) - cell_center_of_mass ) * [4,4,40], axis=1)
+    data_synapses['dists'] = dists
+    return data_synapses[ data_synapses['dists'] < threshold]
