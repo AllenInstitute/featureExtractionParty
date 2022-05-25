@@ -65,6 +65,24 @@ from caveclient import CAVEclient
 
 
 def assign_labels_to_verts(mesh,labels):
+    '''
+    Given a mesh and a vector of labels corresponding to each of the faces, assign labels to each of the vertices.
+
+    Parameters
+    ----------
+    mesh: trimesh_io.Mesh
+        Input mesh where the number of faces corresponds to the length of labels.
+    labels: int list 
+        List of the same length as the number of faces of mesh, where each value corresponds to the label of the 
+        corresponding face.
+    
+    Returns
+    -------
+    vert_labels: int list
+        List the length of the number of vertices of the mesh, where each value corresponds to the label 
+        of the vertex.
+    
+    '''
     v = mesh.vertices
     f = mesh.faces
     vert_labels = np.ones(len(v))
@@ -76,6 +94,21 @@ def assign_labels_to_verts(mesh,labels):
     return vert_labels
 
 def calculate_sdf(mesh_filt):
+    '''
+    Given a mesh, calculate the sdf (shape distance function) at each vertex and return a vector of these values.
+
+    Parameters
+    ----------
+    mesh_filt: trimesh_io.Mesh
+        Input Mesh
+
+    Returns
+    -------
+    rs: np.array
+        Vector the same length as the number of vertices on the input mesh 
+        containing sdf values computed for each vertex.
+    '''
+
     ray_inter = ray_pyembree.RayMeshIntersector(mesh_filt)
     # The first argument below sets the origin of the ray, and I use
     # the vertex normal to move the origin slightly so it doesn't hit at the initial vertex point
@@ -106,7 +139,21 @@ def calculate_sdf(mesh_filt):
     return rs
 
 def check_if_entry_exists(synid,credentials_path):
-    print("checking")
+    '''
+    Given a synapse id and the credentials path for big query.
+
+    Parameters
+    ----------
+    synid: int
+        Synapse ID to check entry for in big query table
+    credentials_path:
+        Path for google credentials
+    
+    Returns
+    -------
+    Boolean value True or False if the entry exists in the table.
+    
+    '''
     sql = """
     select * from  exalted-beanbag-334502.TestDataSet.PSSTable
     where SynapseID = %d
@@ -126,14 +173,46 @@ def check_if_entry_exists(synid,credentials_path):
         return False
 
 def create_closest_submesh(loc_mesh,seg,x,y,z):
+    '''
+    Given a mesh, a vector containing segmentation information of the mesh and the x,y,z coordinates of any 3D point,
+    find the submesh based on the segmentation that is the closest to this point.
+
+    Parameters
+    ----------
+    loc_mesh: trimesh_io.Mesh
+        Input mesh
+    seg: int list
+        List the length of the number of vertices in loc_mesh, where values correspond to labels of segmentation
+        of the mesh into smaller submeshes
+    x: int
+        3d X coordinate of point to check against
+    y: int
+        3d Y coordinate of point to check against
+    z: int
+        3d Z coordinate of point to check against
+    Returns
+    -------
+    spine_mesh: trimesh_io.Mesh
+        Submesh (calculated using a precomputed segmentation seg) within loc_mesh that is closest to point [x,y,z]
+
+    '''
     nfaces = trimesh.proximity.nearby_faces(loc_mesh, [[x,y,z]])
     searchseg = seg[nfaces[0][0]]
     inds = [i for i,val in enumerate(seg) if val==searchseg]
-    spine_mesh = loc_mesh.submesh([inds]) 
-    return spine_mesh[0]
+    spine_mesh = loc_mesh.submesh([inds]) [0]
+    return spine_mesh
 
 def create_data(Obj,m,num_points):
-        #read mesh
+    '''
+    Given .
+
+    Parameters
+    ----------
+    
+    Returns
+    -------
+    
+    '''
     try:
         numvertices = len(m.vertices)
         if (numvertices > -100):
@@ -850,41 +929,18 @@ def image_data_from_vol_numpy(arr, spacing=[1,1,1], origin=[0,0,0]):
     
     return image_data
 
-    
-    
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-            
-        
-
-
-
-
-
-            
-
-
-
-    
-
-   
-
-    
-
-
 def log_string(Obj,out_str):
+    '''
+    Print out logs
+
+    Parameters
+    ----------
+    Obj: dict
+        Dict object containing log information
+    out_str: string
+        String to be printed
+    
+    '''
     Obj['LOG_FOUT'].write(out_str+'\n')
     Obj['LOG_FOUT'].flush()
     #print(out_str)
@@ -922,6 +978,21 @@ def loadCloudH5File(Obj,filename,num_points):
         return None,None
    
 def loadfeatures(feat_files):
+
+    '''
+    Given a list of file names containing features for PSS, load all and return a list of features.
+
+    Parameters
+    ----------
+    feat_files: string list
+        List of feature files (txt format), each containing the feature vector corresponding to one PSS
+    
+    Returns
+    -------
+    features: list
+        List of features read from feature files
+    '''
+
     features = []
     #synapse_distances = []
     index = 0
@@ -933,19 +1004,15 @@ def loadfeatures(feat_files):
         #synapse_distances.append(np.loadtxt(curdistfilename))
     return features
 
-def myprocessingfunctest(Obj,l,q):
-    #print ("%d out of %d "%(q,l))
-    sc = Obj['synapse_scale'] 
-    s = [sc[0]*Obj['data_synapses'].iloc[q]['ctr_pt_position'][0], sc[1]*Obj['data_synapses'].iloc[q]['ctr_pt_position'][1], sc[2]*Obj['data_synapses'].iloc[q]['ctr_pt_position'][2]]
-    
-    #print("synapse: ", s)
-    #loc_mesh = get_segments_for_synapse(Obj,s)
-    allmeshes, vertlabels,loc_mesh,pt,sdf,seg,postcellid = get_segments_for_synapse(Obj,s)
-    
-    #sk = skeletonize.skeletonize_mesh(loc_mesh)
-    return loc_mesh
-
 def myParallelTasks(Obj):
+    '''
+    Given the processing Object, perform PSS extraction locally using taskqueue.
+    Parameters
+    ----------
+    Obj: dict
+        processing object containing configuration information
+    
+    '''
     l = len(Obj['rng'])
     
     index = 0
@@ -957,16 +1024,16 @@ def myParallelTasks(Obj):
         tq.insert_all(tasks) # performs on-line execution (naming is historical)
         index +=1
     
-def myParallelProcess_old(Obj):
- l = len(Obj['rng'])
- from multiprocessing import Pool
- from contextlib import closing
- with closing( Pool(45) ) as p:
-    partial_process = partial(myprocessingfunc,Obj,l)
-    rng = Obj['rng']
-    p.map(partial_process,rng)
-    
 def myParallelProcess(Obj):
+    '''
+    Given the processing Object, perform PSS extraction locally using multiprocessing.
+
+    Parameters
+    ----------
+    Obj: dict
+        processing object containing configuration information
+    
+    '''
      l = len(Obj['rng'])
      from multiprocessing import Process
      procs = []
@@ -978,102 +1045,21 @@ def myParallelProcess(Obj):
      for proc in procs:
         proc.join()
 
-def myprocessingfunc_old(Obj,l,q):
-    
-    synapse_id = Obj['data_synapses'].iloc[q]['id']
-    outputspinefile = Obj['outdir'] + "/PSS_%d_%d.off"%(synapse_id,q)
-    outputlocmeshfile = Obj['outdir'] + "/locmeshPSS_%d_%d.off"%(synapse_id,q)
-    
-    spinemesh = None
-    loc_mesh = None
-    sk = None
-    pt = None
-    
-    #print("This is forcerun: ", Obj['forcerun'])
-    if (not os.path.exists(outputspinefile)) | (Obj['forcerun'] == True):
-    
-        #print ("%d out of %d "%(q,l))
-        #print(Obj['data_synapses'].shape)
-        
-        
-        s, pt = get_synapse_and_scaled_versions(Obj, q)
-        cellid = Obj['data_synapses'].iloc[q]['post_pt_root_id']   
-        dist_to_center,Obj['mesh_bounds'] = get_distance_to_center(Obj,cellid,pt)  
-        allmeshes, vertlabels,loc_mesh,other_pt,sdf,seg,postcellid = get_segments_for_synapse(Obj,s,cellid)
-        
-        #print("Dist to center", dist_to_center)
-        
-        if dist_to_center < 0: #lone segment 
-
-            spinemesh = create_closest_submesh(loc_mesh,seg,pt[0],pt[1],pt[2])
-       
-        else:
-            
-            time_start = time.time()
-            csg = loc_mesh._create_csgraph()
-            ccs = sparse.csgraph.connected_components(csg)
-            ccs_u, cc_sizes = np.unique(ccs[1], return_counts=True)
-            large_cc_ids = ccs_u[cc_sizes > 20] # large components in local mesh
-            etime = time.time()-time_start
-
-            if (dist_to_center < 15000) & (np.max(cc_sizes) >5000): # soma if its close to the nucleus and component is large
-
-                spinemesh = create_closest_submesh(loc_mesh,seg,pt[0],pt[1],pt[2])
-
-            else: #dendrite
-
-                sk = skeletonize.skeletonize_mesh(loc_mesh)
-                
-                try:
-                    
-                    path = find_path_skel2synapse_cp(loc_mesh,sk,pt)
-                    
-                except:
-                    path = None
-                    
-
-                if path is None:
-                    
-                    spinemesh = create_closest_submesh(loc_mesh,seg,pt[0],pt[1],pt[2])
-                else:
-                    
-                    
-                    start_time = time.time()
-                    pathlabels = find_mesh_order(path,vertlabels)
-
-                    if len(pathlabels) > 1: #only cases with more than one segment (those will be either good ones or shafts)
-                        
-                        sdf_verts = assign_labels_to_verts(loc_mesh,sdf)
-                        sdf_mean = []
-                        for ind in range(0,len(pathlabels)):
-                            lastmesh = allmeshes[pathlabels[ind]][0]
-                            t1 = get_indices_of_path(loc_mesh, lastmesh, path)
-                            sdfvec = [sdf_verts[t] for t in t1]
-                            sdf_mean.append(np.mean(sdfvec))
-
-                        if sdf_mean[-1] > sdf_mean[-2]:
-                            
-                            pathlabels = pathlabels[:-1]
-                    spinemeshes = [allmeshes[p] for p in pathlabels ]
-
-                    spinemesh = trimesh.util.concatenate(spinemeshes)
-
-                    elapsed_time = time.time() - start_time
-
-        synapse_id = Obj['data_synapses'].iloc[q]['id']
-        trimesh.exchange.export.export_mesh(spinemesh, Obj['outdir'] + "/PSS_%d_%d.off"%(synapse_id,q))
-        #trimesh.exchange.export.export_mesh(loc_mesh, Obj['outdir'] + "/locmeshPSS_%d_%d.off"%(synapse_id,q))
-
-    #print("Setting up obj")
-    obj = {}
-    obj['spinemesh'] = spinemesh
-    obj['loc_mesh'] = loc_mesh
-    obj['skeleton'] = sk
-    obj['pt'] = pt
-    print(type(obj))
-    return obj
-
 def myprocessingfunc(Obj,l,q):
+    '''
+        Given the processing object, the total number of synapses and the index of the synapse of interest q,
+        extract the PSS and save the mesh locally.
+
+        Parameters
+        ----------
+        Obj: dict
+            Input configuration information read into the dict
+        l: int
+            Total number of synapses
+        q: int
+            Index of synapse to extract PSS for.
+             
+    '''
     
     synapse_id = Obj['data_synapses'].iloc[q]['id']
     outputspinefile = Obj['outdir'] + "/PSS_%d_%d.off"%(synapse_id,q)
@@ -1134,6 +1120,20 @@ def myprocessingfunc(Obj,l,q):
 
 @queueable
 def myprocessingTask(Obj,l,q):
+    '''
+        Given the processing object, the total number of synapses and the index of the synapse of interest q,
+        extract the PSS and save the mesh in the cloud bucket
+
+        Parameters
+        ----------
+        Obj: dict
+            Input configuration information read into the dict
+        l: int
+            Total number of synapses
+        q: int
+            Index of synapse to extract PSS for.
+             
+    '''
     
     synapse_id = Obj['data_synapses'].iloc[q]['id']
     outputspinefile = Obj['outdir'] + "/PSS_%d_%d.off"%(synapse_id,q)
@@ -1199,7 +1199,21 @@ def myprocessingTask(Obj,l,q):
 
 @queueable
 def myprocessingTask_synapseid(Obj,synapse_id,cellid):
-    
+    '''
+        Given the processing object, synapse ID and cell id, extract the PSS and output the mesh into the 
+        google cloud bucket.
+
+        Parameters
+        ----------
+        Obj: dict
+            Input configuration information read into the dict
+        synapse_id: int
+            Synapse ID to process
+        cellid: int
+            Cell ID to extract PSS for
+             
+    '''
+
     outputspinefile = Obj['outdir'] + "/PSS_%d.off"%(synapse_id)
     outputlocmeshfile = Obj['outdir'] + "/locmeshPSS_%d.off"%(synapse_id)
     
@@ -1213,16 +1227,13 @@ def myprocessingTask_synapseid(Obj,synapse_id,cellid):
     otherexists = os.path.exists(Obj['google_secrets_file'])
     
     fname = Obj['cloud_bucket']+ '%s/PSS_%d.h5'%(Obj['type_of_shape'],synapse_id)
-    print("This is file exists", fname,file_exists, otherexists)
     
     if ((not file_exists) | (Obj['forcerun'] == True)):
     
         s, pt = get_synapse_and_scaled_versions_synapseid(Obj, synapse_id)
         dist_to_center,Obj['mesh_bounds'] = get_distance_to_center(Obj,cellid,pt)  
         allmeshes, vertlabels,loc_mesh,other_pt,sdf,seg,large_loc_mesh,postcellid = get_segments_for_synapse(Obj,s,cellid)
-        print("got all meshes")
         if allmeshes is not None:
-            print("Running if")
             if dist_to_center < 0: #lone segment 
 
                 spinemesh = create_closest_submesh(loc_mesh,seg,pt[0],pt[1],pt[2])
@@ -1230,7 +1241,6 @@ def myprocessingTask_synapseid(Obj,synapse_id,cellid):
             else:
 
                 spinemesh,sk = get_PSS_from_locmesh(pt,s,loc_mesh,dist_to_center,sdf,seg,vertlabels,allmeshes,cellid,Obj,large_loc_mesh)
-            print("begin saving to cloud")
             #save to cloud
 
             spinemesh.vertices = spinemesh.vertices - np.mean(large_loc_mesh.vertices,axis=0)
@@ -1239,7 +1249,6 @@ def myprocessingTask_synapseid(Obj,synapse_id,cellid):
             cf = CloudFiles(Obj['cloud_bucket'],secrets =Obj['google_secrets_file'])
             with open(Obj['google_secrets_file'], 'r') as file:
                 secretstring = file.read().replace('\n', '')
-            print("got secret")
             #cf = CloudFiles(Obj['cloud_bucket']+ '%s/%d/'%(Obj['type_of_shape'],Obj['nucleus_id']),secrets =secretstring)
             cf = CloudFiles(Obj['cloud_bucket']+ '%s/'%(Obj['type_of_shape']),secrets =secretstring)
             
@@ -1275,7 +1284,20 @@ def myprocessingTask_synapseid(Obj,synapse_id,cellid):
 
 @queueable
 def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
+    '''
+        Given the processing object, synapse ID and cell id, extract the PSS and the 1024 vector and 
+        input into the bigquery table. This is the function called for the latest cloud processing.
 
+        Parameters
+        ----------
+        Obj: dict
+            Input configuration information read into the dict
+        synapse_id: int
+            Synapse ID to process
+        cellid: int
+            Cell ID to extract PSS for
+             
+    '''
 
     print (synapse_id, "Now starting task" )
     credentials_path = "/usr/local/featureExtractionParty/bigquery_credentials.json"
@@ -1305,7 +1327,6 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
         otherexists = os.path.exists(Obj['google_secrets_file'])
         
         fname = Obj['cloud_bucket']+ '%s/PSS_%d.h5'%(Obj['type_of_shape'],synapse_id)
-        print("This is file exists", fname,file_exists, otherexists)
         
         if 1==1:
         #if ((not file_exists) | (Obj['forcerun'] == True)):
@@ -1313,7 +1334,6 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
             s, pt = get_synapse_and_scaled_versions_synapseid(Obj, synapse_id)
             dist_to_center,Obj['mesh_bounds'] = get_distance_to_center(Obj,cellid,pt)  
             allmeshes, vertlabels,loc_mesh,other_pt,sdf,seg,large_loc_mesh,postcellid = get_segments_for_synapse(Obj,s,cellid)
-            print("got all meshes")
             if allmeshes is not None:
                 
                 if dist_to_center < 0: #lone segment 
@@ -1323,7 +1343,6 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
                 else:
 
                     spinemesh,sk = get_PSS_from_locmesh(pt,s,loc_mesh,dist_to_center,sdf,seg,vertlabels,allmeshes,cellid,Obj,large_loc_mesh)
-                print("begin saving to cloud")
                 #save to cloud
 
                 spinemesh.vertices = spinemesh.vertices - np.mean(large_loc_mesh.vertices,axis=0)
@@ -1374,7 +1393,6 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
                     pred_val = sess.run([ops['embedding']], feed_dict=feed_dict)
                     
 
-                    print(list(pred_val[0][0]))
                     credentials_path = "/usr/local/featureExtractionParty/bigquery_credentials.json"
                     insert_into_PSS_table(synapse_id, pred_val[0][0].tolist(),postcellid,credentials_path)
                     
@@ -1387,7 +1405,6 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
         del(Obj)
     else:
         print("Record already exists")
-
 
 def mySerialProcess(Obj):
  l = len(Obj['rng'])
@@ -1425,9 +1442,22 @@ def myevalfunc(Obj, ops,is_training, sess,fn):
         cf.put_json(outfile, content=np.squeeze(pred_val))
 
 def reduce_features_spines(features):
-    #print("Length of features: ")
-    #print(features.shape)
-    #print(type(features))
+    '''
+    Given a list of features, calculate the UMAP fit to 2 dimensions.
+
+    Parameters
+    ----------
+    features: list
+        list of feature vectors (size 1024 for PSS features but would work on any size)
+
+    Returns
+    -------
+    embedding : array, shape (n_samples, n_components)
+            Embedding of the training data in low-dimensional space.
+
+    reducer: umap.UMAP
+        UMAP model computed from the input dataset
+    '''
     
     
     reducer = umap.UMAP(random_state=20,n_neighbors=20)
@@ -1435,6 +1465,21 @@ def reduce_features_spines(features):
     return embedding,reducer
 
 def remove_bad_faces (mesh):
+    '''
+    Remove faces from a mesh with duplicate vertices.
+
+    Parameters
+    ----------
+    mesh: trimesh_io.mesh
+        input mesh object 
+    
+    Returns
+    -------
+    allfaces: list
+        list of all faces that are valid. (where duplicate vertices have been removed)
+    
+    '''
+
     allfaces = []
     for f in  mesh.faces:
         if f[0] == f[1]:
@@ -1448,6 +1493,20 @@ def remove_bad_faces (mesh):
     return np.array(allfaces)
 
 def rotate_to_principal_component(vertices):
+    '''
+    Given vertices of a shape, rotate the shape to align with its principal component.
+
+    Parameters
+    ----------
+    vertices: numpy.array
+        Nx3 shaped matrix containing vertices of a 3D shape
+
+    Returns
+    -------
+    rotated_data: numpy.array
+        Nx3 shaped matrix where shape is rotated to the principal component
+    
+    '''
     pca = decomposition.PCA(n_components=3)
     pca.fit(vertices)
     mainaxis = pca.components_[0]
@@ -1457,11 +1516,23 @@ def rotate_to_principal_component(vertices):
     return rotated_data
               
 def rotation_matrix_from_vectors(vec1, vec2):
-    """ Find the rotation matrix that aligns vec1 to vec2
-    :param vec1: A 3d "source" vector
-    :param vec2: A 3d "destination" vector
-    :return mat: A transform matrix (3x3) which when applied to vec1, aligns it with vec2.
-    """
+
+    '''
+    Find the rotation matrix that aligns vec1 (source) to vec2 (destination).
+
+    Parameters
+    ----------
+    vec1: numpy.array
+        A 3d "source" vector
+    vec2: numpy.array
+        A 3d "destination" vector
+
+    Returns
+    -------
+    mat: numpy.array
+        A transform matrix (3x3) which when applied to vec1, aligns it with vec2.
+    '''
+
     a, b = (vec1 / np.linalg.norm(vec1)).reshape(3), (vec2 / np.linalg.norm(vec2)).reshape(3)
     v = np.cross(a, b)
     c = np.dot(a, b)
@@ -1471,10 +1542,30 @@ def rotation_matrix_from_vectors(vec1, vec2):
     return rotation_matrix
 
 def savedebugmesh(mesh):
+    '''
+    Given a mesh, save it as test.off.
+
+    Parameters
+    ----------
+    mesh: trimesh_io.Mesh
+        input mesh
+
+    '''
     trimesh.exchange.export.export_mesh(mesh,"test.off")
 
 def save_submeshes(submeshes,inds):
+    '''
+    Given a list of submeshes, save all in the debug directory.
+
+    Parameters
+    ----------
+    submeshes: list
+        list of mesh objects 
+    inds:
+        indices to be saved
     
+    '''
+
     for i,ind in enumerate(inds):
         trimesh.exchange.export.export_mesh(submeshes[ind][0], "debug/pathspine_%d_%d.off"%(ind,i)) 
 
