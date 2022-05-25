@@ -53,7 +53,27 @@ from analysisdatalink.datalink_ext import AnalysisDataLinkExt as AnalysisDataLin
 from annotationframeworkclient import infoservice,FrameworkClient
 
         
-def extract_shape_updated(cfg,cell_id,run):
+def extract_shape(cfg,cell_id,run):
+    '''
+    Given the dict containing all user input parameters, calculate other relevant parameters and 
+    extract the PSS shape .
+
+    Parameters
+    ----------
+    cfg:
+        Dict object containing input parameters directly read from configuration file
+    cell_id:
+        Cell id to process
+    run:
+        Flag for type of run to perform locally (parallelTask uses a local taskqueue and parallelProcess uses multiprocessing)
+    Returns
+    -------
+    procObj: dict
+        Dict containing all parameters given as input for extracting shape
+    obj: dict
+        Dict contiaining all parameters used for input and intermediate variables used for processing
+    '''
+
     procObj = {}
     
     #from cfg
@@ -128,6 +148,23 @@ def extract_shape_updated(cfg,cell_id,run):
     return procObj,obj
 
 def extract_shape_and_generate_features_updated(config_file,cell_id_list,run="parallel"):
+    '''
+    Given a configuration file, a list of cell ids to process and a flag for how to run it 
+    (parallel or serial), extract shape files and features and save them all as files.
+    Basil was processed using this.
+
+    Parameters
+    ----------
+    config_file: string 
+        JSON file name containing all parameters for running extraction 
+          
+    cell_id_list: int list
+        List of cell ids to extract PSS from
+          
+    run : string
+        Parameter for deciding whether to run in parallel or serially
+          
+    '''
     with open(config_file) as f:
       cfg = json.load(f)
     
@@ -135,11 +172,9 @@ def extract_shape_and_generate_features_updated(config_file,cell_id_list,run="pa
     cfg['client'] = FrameworkClient(cfg['dataset_name'],auth_token_file=cfg['auth_token_file'])
 
     
-    #seg_source = cfg['client'].info.segmentation_source()
     tokenfile = cfg['auth_token_file']
     with open(tokenfile) as f:
       tokencfg = json.load(f)
-    #cfg['cv'] = cloudvolume.CloudVolume(seg_source, use_https=True,secrets=tokencfg['token'])
     
     cfg['token'] = tokencfg['token']
     cfg['segsource'] = cfg['client'].info.segmentation_source()
@@ -151,8 +186,7 @@ def extract_shape_and_generate_features_updated(config_file,cell_id_list,run="pa
     
     #Processing
     for cell_id in cell_id_list:
-        #print(cell_id)
-        procObj,obj = extract_shape_updated(cfg,cell_id,run)
+        procObj,obj = extract_shape(cfg,cell_id,run)
         cfg['offfiles'] = procObj['offfiles']
         cfg['outdir'] = procObj['outdir']
         
