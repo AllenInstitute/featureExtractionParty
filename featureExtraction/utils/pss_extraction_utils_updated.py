@@ -616,6 +616,38 @@ def get_local_mesh_imagery(Obj,synapse_loc):
     return M
    
 def get_segments_for_synapse(Obj, synapse_loc,cellid):
+    '''
+    Given .
+
+    Parameters
+    ----------
+    Obj: dict 
+        object containing configuration and input
+    synapse_loc: numpy array of size 3
+        3d location of synapse
+    cellid: int
+        cell id to process
+    
+    Returns
+    -------
+    allmeshes: list of trimesh_io.mesh
+        list of all meshes after segmenting 
+    vertlabels: int list
+    
+    loc_mesh: trimesh_io
+    
+    [x,y,z]: int list
+    
+    sdf: float list
+    
+    seg: int list
+    
+    large_loc_mesh: trimesh_io
+    
+    postcellid: int
+        postsynaptic cell for which the PSS was extracted.
+    
+    '''
     x = synapse_loc[0]
     y = synapse_loc[1]
     z = synapse_loc[2]
@@ -741,6 +773,23 @@ def get_trimesh_from_segmask(seg_mask, og_cm, cutout_radius, mip, imageclient):
     return new_mesh
 
 def get_indices_of_path(loc_mesh, mesh, point_inds):
+    '''
+    Given a mesh loc_mesh and a submesh on it mesh, and point_inds which are a subset of points (on a path) 
+    in loc_mesh, find the
+    Parameters
+    ----------
+    loc_mesh: trimesh_io.Mesh
+
+    mesh: trimesh_io.Mesh
+
+    point_inds: point indices 
+    
+    Returns
+    -------
+    indices: int list
+        List of indices of vertex points in loc_mesh that are in mesh.
+    
+    '''
     mv =mesh.vertices
     mvl = np.ndarray.tolist(mv)
     indices = []
@@ -915,6 +964,17 @@ def insert_into_PSS_table(synid, pss_vector, cellid, credentials_path):
         print("Encountered errors while inserting rows: {}".format(errors))
 
 def image_data_from_vol_numpy(arr, spacing=[1,1,1], origin=[0,0,0]):
+    '''
+    Given .
+
+    Parameters
+    ----------
+    
+    Returns
+    -------
+    
+    '''
+
     #da=trimesh_vtk.numpy_to_vtk(arr.ravel()) #.ravel returns a contiguous flattened array
     
     da = trimesh_vtk.numpy_to_vtk(np.ravel(arr,order='F'))
@@ -946,6 +1006,29 @@ def log_string(Obj,out_str):
     #print(out_str)
 
 def loadCloudH5File(Obj,filename,num_points):
+    '''
+    Load a  mesh file from the cloud, sample the number of points and return a point cloud.
+
+    Parameters
+    ----------
+    Obj: dict
+        Processing object
+
+    filename: string
+        H5 file location on the cloud
+
+    num_points: int
+        Numbr of vertices to sample
+    
+    Returns
+    -------
+    vertices: numpy.array
+        3d vertex point cloud for the input shape containing num_points (number of vertices)
+
+    labels: int list
+        labels of vertices
+    
+    '''
     
     #read mesh
     try:
