@@ -204,13 +204,23 @@ def create_closest_submesh(loc_mesh,seg,x,y,z):
 
 def create_data(Obj,m,num_points):
     '''
-    Given .
+    Given a processing object, mesh and number of points, sample a fixed number of poitns from the surface mesh 
+    and return the point cloud.
 
     Parameters
     ----------
-    
+    Obj: dict
+        Processing Object
+    m:  trimesh_io.Mesh
+        Input Mesh
+    num_points: int
+        Number of points to sample
     Returns
     -------
+    vertices: numpy array
+        3D vertices of point cloud sampled on input mesh, with "num_points" number of vertices.
+    labels:
+        Labels - this is a dummy variable that is needed for PointNet
     
     '''
     try:
@@ -235,6 +245,23 @@ def create_data(Obj,m,num_points):
         return None,None
     
 def create_submeshes(mesh,  labels):
+    '''
+    Given a mesh, and vector containing segmentation labels at the vertices 
+    generate all submeshes based on the segmentation labels.
+
+    Parameters
+    ----------
+    mesh: trimesh_io.Mesh
+        Input mesh
+    labels: int list
+        List the length of the number of vertices in loc_mesh, where values correspond to labels of segmentation
+        of the mesh into smaller submeshes
+    Returns
+    -------
+    mydict: dict
+        Dict containing all submeshes, where the key for a mesh is the label number in the segmentation label vector
+
+    '''
     allsubmeshes = []
     allkeys = []
     mydict = {}
@@ -245,13 +272,24 @@ def create_submeshes(mesh,  labels):
         mydict[u] = submesh
     return mydict
 
-def dist2pt (features, pt):
-    features = np.array(features)
-    pt = np.array(pt)
-    dists = np.linalg.norm(features-pt[np.newaxis,:],axis=1) 
-    return np.argmin(dists,axis=0) 
 
 def eval_one_epoch(Obj, sess, ops, num_votes=1, topk=1):
+    
+    '''
+    Evaluate the processing object, tensorflow session and dict for tensorflow processing,
+    read the mesh files, run it through pointnet and save feature in text files on disk.
+
+    Parameters
+    ----------
+    Obj: dict
+        Processing Object
+    sess: tf.Session
+        Tensorflow session for running pointnet
+    ops: dict
+        Dict for processing pointnet
+    
+    '''
+
     features = []
     filenames = []
     
@@ -274,6 +312,15 @@ def eval_one_epoch(Obj, sess, ops, num_votes=1, topk=1):
                 np.savetxt(outfile,np.squeeze(pred_val))
 
 def evaluate(Obj, num_votes=1):
+    '''
+    Given the processing object, extract features and save to disk.
+
+    Parameters
+    ----------
+    Obj: dict
+        Processing Object
+       
+    '''
     is_training = False
      
     with tf.device('/gpu:'+str(Obj['pointnet_GPU_INDEX'])):
@@ -314,6 +361,16 @@ def evaluate(Obj, num_votes=1):
     #return features,files
     
 def evaluate_cloud(Obj, num_votes=1):
+
+    '''
+    Given the processing object, extract features and save to the cloud.
+
+    Parameters
+    ----------
+    Obj: dict
+        Processing Object
+       
+    '''
     is_training = False
      
     with tf.device('/gpu:'+str(Obj['pointnet_GPU_INDEX'])):
@@ -354,6 +411,20 @@ def evaluate_cloud(Obj, num_votes=1):
     #return features,files
 
 def eval_one_epoch_cloud(Obj, sess, ops, num_votes=1, topk=1):
+    '''
+    Evaluate the processing object, tensorflow session and dict for tensorflow processing,
+    read the mesh files, run it through pointnet and save feature in the cloud.
+
+    Parameters
+    ----------
+    Obj: dict
+        Processing Object
+    sess: tf.Session
+        Tensorflow session for running pointnet
+    ops: dict
+        Dict for processing pointnet
+    
+    '''
     
     is_training = False
     fout = open(os.path.join(Obj['pointnet_dump_dir'], 'pred_label.txt'), 'w')
@@ -388,6 +459,23 @@ def eval_one_epoch_cloud(Obj, sess, ops, num_votes=1, topk=1):
                 #features.append(np.squeeze(pred_val))
 
 def eval_one_epoch_cloud_multi(Obj,sess,ops,num_votes=1,topk=1):
+    '''
+    TEST FUNCTION
+    Given the processing object, tensorflow session and dict for tensorflow processing,
+    read the mesh files, run it through pointnet and save feature in text files on disk - 
+    (Test serial processing and multiprocessing)
+
+    Parameters
+    ----------
+    Obj: dict
+        Processing Object
+    sess: tf.Session
+        Tensorflow session for running pointnet
+    ops: dict
+        Dict for processing pointnet
+    
+    '''
+
     from multiprocessing import Pool
     from contextlib import closing
     is_training = False
@@ -404,6 +492,21 @@ def eval_one_epoch_cloud_multi(Obj,sess,ops,num_votes=1,topk=1):
     #    p.map(partial_process,rng)
 
 def featureExtractionTask_cell(Obj,cellid,data_synapses):
+    '''
+    Given the processing object object, cell ID and a synapses data frame, calculate the features for the 
+    extracted PSS and save on the cloud.
+
+    Parameters
+    ----------
+    Obj: dict
+        Processing object
+    cellid: int
+        Input Cell id 
+    data_synapses: pandas.DataFrame
+        Dataframe with synapses
+    
+    '''
+
     cf = CloudFiles(Obj['cloud_bucket'],secrets =Obj['google_secrets_file'])
     with open(Obj['google_secrets_file'], 'r') as file:
         secretstring = file.read().replace('\n', '')
@@ -426,6 +529,26 @@ def featureExtractionTask_cell(Obj,cellid,data_synapses):
     tf.reset_default_graph()
 
 def find_closest_component(loc_mesh, x,y,z):
+    '''
+    Given a mesh and the coordinates of a point, find the closest connected component of the mesh to the point. 
+
+    Parameters
+    ----------
+    loc_mesh: trimesh_io.Mesh
+        Input Mesh
+    x: int
+        X coordinate
+    y: int
+        Y coordinate
+    z: int
+        Z coordinate
+    
+    Returns
+    -------
+    besta: trimesh_io.Mesh
+        Mesh that is the largest connected component 
+    
+    '''
 
     print(x,y,z)
     print(np.mean(loc_mesh.vertices,axis=1))    
@@ -446,6 +569,23 @@ def find_closest_component(loc_mesh, x,y,z):
     return besta
 
 def find_mesh_order(path,vertlabels):
+    '''
+    Given a path and vertex labels for the whole mesh, find the labels of the meshes that lie on the path.
+
+    Parameters
+    ----------
+    path: list
+        list of indices of vertices that lie on the path of interest
+    vertlabels: list
+        list of labels of all vertices
+    
+    Returns
+    -------
+    pathlabels: list
+        list of unique labels of vertices along path (ie: if many points on the path share the same
+        label, they are compacted into 1)
+    
+    '''
     pathlabels = []
     for ip in path:
         pathlabels.append(vertlabels[ip])
@@ -748,6 +888,23 @@ def get_segments_for_synapse(Obj, synapse_loc,cellid):
     #return loc_mesh
 
 def get_indices_of_skeleton_verts(mesh, sk):
+    '''
+    Given a mesh and a skeleton, find the indices of the mesh vertices that correspond to skeleton vertices. 
+    This was written before the new skeleton updates to meshparty.
+
+    Parameters
+    ----------
+    mesh: trimesh_io.Mesh
+        Input mesh
+    sk: skeleton.Skeleton
+        Skeleton which lies on this mesh
+    
+    Returns
+    -------
+    indices: list
+        List of indices of mesh vertices which correspond to skeleton vertices.
+    
+    '''
     mv = mesh.vertices
     sv = sk.vertices
     mvl = np.ndarray.tolist(mv)
@@ -758,12 +915,51 @@ def get_indices_of_skeleton_verts(mesh, sk):
     return indices
 
 def getind(vertexlist, point):
+    '''
+    Given a list of vertices and a single vertex, find its index in the list.
+
+    Parameters
+    ----------
+    vertexlist: list
+        List of vertices
+    point: numpy array
+        Single input point
+    
+    Returns
+    -------
+    i: index of point in the list. Value of -1 if it is not found
+    
+    '''
     for i in range(0, len(vertexlist)):
         if( (point[0] == vertexlist[i][0]) & (point[1] == vertexlist[i][1]) & (point[2] == vertexlist[i][2])  ):
             return i
     return -1
 
 def get_mesh(centerpoint, cutout_radius,  segid, bounds, mip, imageclient):
+    '''
+    Get the mesh around a centerpoint using the segmentation image and generating a mesh from that.
+
+    Parameters
+    ----------
+    centerpoint: numpy array
+        Center point around which to generate mesh
+    cutout_radius: int
+        Radius around cneter point for cutout of mesh
+    segid: int
+        Segmentation Id of interest
+    bounds: numpy array
+        2x3 array Bounds for the segmentation image used to generate mask
+    mip: int
+        Mip level to downsample to
+    imageclient: imageclient
+        Client to connect to image data
+    
+    Returns
+    -------
+    mesh: trimesh_io
+        Mesh generated from imagery
+    
+    '''
     seg_cutout = imageclient.segmentation_cutout(bounds,mip=mip,root_ids=[segid])
     seg_cutout = np.squeeze(seg_cutout)
     mask = seg_cutout == segid
@@ -772,6 +968,28 @@ def get_mesh(centerpoint, cutout_radius,  segid, bounds, mip, imageclient):
     return mesh
 
 def get_trimesh_from_segmask(seg_mask, og_cm, cutout_radius, mip, imageclient):
+    '''
+    Given the Segmentation mask, center point, cutout radius, mip and image client, generate the mesh of the object
+    around the center point within the cutout radius.
+
+    Parameters
+    ----------
+    seg_mask:
+        Segmentation mask used to generate mesh
+    og_cm:
+        Center point around which mesh is captured
+    cutout_radius: int
+        Radius around center point to extract mesh
+    mip: int
+        Mip level to use
+    imageclient: image client
+        Client to connect to image data
+    
+    Returns
+    -------
+    new_mesh: trimesh_io
+        Mesh generated from imagery
+    '''
     
     mip_resolution = imageclient.segmentation_cv.mip_resolution(mip)
     spacing_nm = mip_resolution
@@ -1087,13 +1305,21 @@ def insert_into_PSS_table(synid, pss_vector, cellid, credentials_path):
 
 def image_data_from_vol_numpy(arr, spacing=[1,1,1], origin=[0,0,0]):
     '''
-    Given .
+    Create vtk image data from numpy array
 
     Parameters
     ----------
+    arr: numpy.array
+        Input numpy array
+    spacing: int list
+        Vector describing image spacing in x, y and z. 
+    origin: int list
+        Coordinate of origin
     
     Returns
     -------
+    image_data: vtk.vtkImageData
+        vtkImage data containing data from array, and spacing and origin also input.
     
     '''
 
@@ -1612,6 +1838,17 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
         print("Record already exists")
 
 def mySerialProcess(Obj):
+
+'''
+    Given the processing object extract the PSS for all synapses in the Object and output the meshes into the 
+    google cloud bucket.
+
+    Parameters
+    ----------
+    Obj: dict
+        Input configuration information read into the dict
+            
+    '''
  l = len(Obj['rng'])
  for i in Obj['rng']:
         #try:
@@ -1623,6 +1860,26 @@ def mySerialProcess(Obj):
  return obj   
 
 def myevalfunc(Obj, ops,is_training, sess,fn):
+    '''
+    Given the processing object, tensorflow session and dict for tensorflow processing,
+    and one mesh file, run it through pointnet and save feature in the cloud.
+
+    Parameters
+    ----------
+    Obj: dict
+        Processing Object
+    sess: tf.Session
+        Tensorflow session for running pointnet
+    ops: dict
+        Dict for processing pointnet
+    fn: int
+        index for which file to process
+    is_training: bool
+        Flag to determine if the data is for training or not. In the evaluation, it is always false 
+        and used only to compute the feature.
+    
+    '''
+
     log_string(Obj,'----'+str(fn)+'----')
 
     
