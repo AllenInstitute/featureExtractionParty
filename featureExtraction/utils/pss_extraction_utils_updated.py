@@ -456,6 +456,26 @@ def find_mesh_order(path,vertlabels):
     return pathlabels
 
 def find_path_skel2synapse_cp(loc_mesh,sk,pt):
+    '''
+    Given a mesh, the skeleton running on the shaft and a point, find the path starting from the vertex on the mesh 
+    that is closest to the point pt to the skeleton sk which runs on the shaft. This function is crucial for the 
+    spine extraction.
+
+    Parameters
+    ----------
+    loc_mesh: trimesh_io.Mesh
+        Local Mesh
+    sk: skeleton.Skeleton
+        Skeleton running on shaft
+    pt: numpy array
+        coordinatees of point in 3D from which you want to start the path.
+    
+    Returns
+    -------
+    path: list of numpy array
+        list of points along calculated path from closest vertex on the mesh (to the input point) to the skeleton
+    
+    '''
     t = get_indices_of_skeleton_verts(loc_mesh, sk)
     sk_inds = [val for i,val in enumerate(t) if not val == -1 ]
     
@@ -477,6 +497,20 @@ def find_path_skel2synapse_cp(loc_mesh,sk,pt):
         return path
 
 def findunprocessed_indices(Obj):
+    '''
+    For local processing, find the synapses whose files on disk that have not been produced / processed yet.
+
+    Parameters
+    ----------
+    Obj: dict
+        processing object
+    
+    Returns
+    -------
+    unproc: int list
+        indices of synapses in the synapse dataframe that have not been processed yet.
+    
+    '''
     
     unproc = []
     allindices = Obj['rng']
@@ -496,6 +530,22 @@ def findunprocessed_indices(Obj):
     return unproc
 
 def get_local_mesh(Obj,synapse_loc,cellid):
+    '''
+    Given the processing object, synapse location and cell id , extract a local mesh around it.
+
+    Parameters
+    ----------
+    Obj: dict
+        Input processing object
+    synapse_loc: numpy array
+        Synapse coordinates around which local mesh is to be extracted
+    cellid: int
+        Cell id for which the local mesh is to be extracted
+    Returns
+    -------
+    largest_mesh: Local Mesh around synapse
+
+    '''
     pt = np.array(synapse_loc)
     #print("pt: ", pt)
     pt[0] = pt[0]/2
@@ -550,56 +600,25 @@ def get_local_mesh(Obj,synapse_loc,cellid):
         #print("size of mesh: None")
     
     return largest_mesh
-
-def get_local_meshbackup(Obj,synapse_loc):
-    pt = np.array(synapse_loc)
-    pt[0] = pt[0]/2
-    pt[1] = pt[1]/2
-    myarray = np.array(Obj['mesh_bounds'])
-    
-   
-
-    running = True
-    while running == True:
-        try:
-            #print("this is myarray: ",myarray)
-            #print(pt)
-            #print(Obj['cell_id'])
-            mins = pt - myarray
-            maxs = pt + myarray
-            bbox = cloudvolume.Bbox(mins, maxs)
-            #print(mins, maxs, Obj['cell_id'])
-            cv = cloudvolume.CloudVolume(Obj['segsource'], use_https=True,secrets=Obj['token'])
-            cvmesh=cv.mesh.get(Obj['cell_id'], bounding_box=bbox, use_byte_offsets=True,remove_duplicate_vertices = True)
-            
-            running = False
-        except:
-            
-            myarray[0] = int(myarray[0]/2)
-            myarray[1] = int(myarray[1]/2)
-            
-        if myarray[0] < 100:
-            running = False
-        
-    
-    
-    mesh = trimesh_io.Mesh(vertices=cvmesh[Obj['cell_id']].vertices,
-                        faces=cvmesh[Obj['cell_id']].faces,
-                        process=False)
-    
-    mesh.faces = remove_bad_faces(mesh)
-    is_big = mesh_filters.filter_largest_component(mesh)
-    largest_mesh = mesh.apply_mask(is_big)
-    ##largest_mesh = mesh
-    
-    trimesh.smoothing.filter_laplacian(largest_mesh, lamb=0.2, iterations=3, implicit_time_integration=False, volume_constraint=False, laplacian_operator=None)
-    #verts = np.array([[0,0.5, 0.7],[0.4,0.5, 0.2],[0.9,0.5, 0.3],[0.8,0.5, 0.5]] )
-    #faces = np.array([[1,2,3]])
-    #mesh = trimesh_io.Mesh(vertices = verts, faces = faces, process=False)   
-    return mesh
-    #return 1
     
 def get_local_mesh_imagery(Obj,synapse_loc):
+    '''
+    Given the processing object and synapse location, get the local mesh by using the segmentation image
+    (instead of the precomputed mesh).
+
+    Parameters
+    ----------
+    Obj: dict
+        Processing object
+    synapse_loc: numpy array
+        3 X 1 array with coordinates of synapse location around which to extract local mesh
+    
+    Returns
+    -------
+    M: trimesh_io.Mesh
+        Mesh extracted around synapse point
+
+    '''
     imageclient=imagery.ImageryClient(framework_client=Obj['client'])
     pt = np.array(synapse_loc)
     pt[0] = pt[0]/2
@@ -617,7 +636,8 @@ def get_local_mesh_imagery(Obj,synapse_loc):
    
 def get_segments_for_synapse(Obj, synapse_loc,cellid):
     '''
-    Given .
+    Given a processing object, synapse location and cellid, find the local mesh, segment it and return a list of
+    submeshes.
 
     Parameters
     ----------
@@ -633,17 +653,17 @@ def get_segments_for_synapse(Obj, synapse_loc,cellid):
     allmeshes: list of trimesh_io.mesh
         list of all meshes after segmenting 
     vertlabels: int list
-    
+        list of segmentation assignments for vertices of mesh
     loc_mesh: trimesh_io
-    
+        local mesh around synapse for segmenting 
     [x,y,z]: int list
-    
+        x,y,z coordinates of synapse location
     sdf: float list
-    
+        list of sdf values for faces of mesh
     seg: int list
-    
+        list of segmentation assignments for faces of mesh
     large_loc_mesh: trimesh_io
-    
+        large mesh downloaded around synapse which can be used for skeletonization
     postcellid: int
         postsynaptic cell for which the PSS was extracted.
     
@@ -800,6 +820,25 @@ def get_indices_of_path(loc_mesh, mesh, point_inds):
     return indices
 
 def get_synapse_and_scaled_versions(Obj, q):
+    '''
+    Given the processing object and the index of the synapse of interest, return the scaled synapse and synapse in 
+    nanometers.
+
+    Parameters
+    ----------
+    Obj: dict
+        Processing object
+    q: int
+        Index of synapse of interest
+    
+    Returns
+    -------
+    s: numpy array
+        Scaled synapse
+    s_nm: numpy array
+        Synapse in nanometers
+    
+    '''
     sc = Obj['synapse_scale'] 
     s = [sc[0]*Obj['data_synapses'].iloc[q]['ctr_pt_position'][0], sc[1]*Obj['data_synapses'].iloc[q]['ctr_pt_position'][1], sc[2]*Obj['data_synapses'].iloc[q]['ctr_pt_position'][2]]
     #print(s)
@@ -809,7 +848,25 @@ def get_synapse_and_scaled_versions(Obj, q):
     return s, s_nm
 
 def get_synapse_and_scaled_versions_synapseid(Obj, synapse_id):
+    '''
+    Given the processing object and the synapse id, return the scaled synapse and synapse in 
+    nanometers.
+
+    Parameters
+    ----------
+    Obj: dict
+        Processing object
+    synapse_id: int
+        Synapse ID
     
+    Returns
+    -------
+    s: numpy array
+        Scaled synapse
+    s_nm: numpy array
+        Synapse in nanometers
+    
+    '''
     sc = Obj['synapse_scale']
     client = FrameworkClient(Obj['dataset_name'],auth_token_file=Obj['auth_token_file'])
     
@@ -822,24 +879,40 @@ def get_synapse_and_scaled_versions_synapseid(Obj, synapse_id):
     return s, s_nm
 
 def get_distance_to_center(Obj,cellid,s_nm):
-    #print("this is it")
-    #print(Obj['cell_center_of_mass'], )
-    #print(cellid)
+    '''
+    Given the processing object, cell ID and synapse location in nanonmeters, find the distance of the synapse
+    to the nucleus center of the cell id.
+
+    Parameters
+    ----------
+    Obj: dict
+        processing object
+    cellid: int
+        cell id of interest
+    s_nm: numpy array
+        synapse location in nanometers
+    
+    Returns
+    -------
+    dist_to_center: float
+        Euclidean distance between synapse and center of cell. If it is a floating segment without a nucleus, 
+        this value is returned as -1000
+    Obj["mesh_bounds"]: numpy int array 
+        Mesh bounds which would change based on the distance to the center (ie: avoid a very 
+        large bound range when near the soma)
+
+    
+    '''
+    #case when you are looking at targets 
     if Obj['cell_center_of_mass'] is None:
         
         try:
             client = FrameworkClient(Obj['dataset_name'],auth_token_file=Obj['auth_token_file'])
-            #client = Obj['client']
             Obj['cell_center_of_mass'] =client.materialize.query_table('nucleus_detection_v0',filter_in_dict={'pt_root_id':['%d'%cellid]}, materialization_version = Obj['materialization_version'])['pt_position'].values[0]
             
             center = Obj['cell_center_of_mass']*[4,4,40]
             
-            #print("These are the points: ", s_nm, center)
             dist_to_center = np.linalg.norm(np.array(s_nm)-center)
-            #print("got a center and distance:")
-            #print(Obj['cell_center_of_mass'])
-            #print(cellid)
-            #print(dist_to_center)
             
             if (dist_to_center < 15000): #soma
                 Obj["mesh_bounds"] = [200,200,200]
@@ -848,22 +921,55 @@ def get_distance_to_center(Obj,cellid,s_nm):
             #This is a floating segment without a nucleus
             dist_to_center = -1000
             Obj["mesh_bounds"] = [200,200,200]
-            
+
+    #case when you are looking at post synaptic shapes on the cell id in question      
     else:
-        print(Obj['cell_center_of_mass'])
-        
         center = np.array(Obj['cell_center_of_mass'])*np.array([4,4,40])
-        #print(center)
-        #print(s_nm)
         dist_to_center = np.linalg.norm(np.array(s_nm)-center)
-        #print("This is dist to center: ", dist_to_center)
         if (dist_to_center < 15000):
             Obj["mesh_bounds"] = [300,300,300]
     
     return dist_to_center, Obj["mesh_bounds"]
 
 def get_PSS_from_locmesh(pt,s,loc_mesh,dist_to_center,sdf,seg,vertlabels,allmeshes,cellid,Obj,large_loc_mesh):
-    
+    '''
+    Given all the variables precomputed for PSS extraction, extract it and return it. This function was
+    just written to condense code to be more readable in the "myprocessingfunc"s.
+
+    TODO: Clean up some variables
+
+    Parameters
+    ----------
+    pt: numpy array
+        synapse location
+    s: numpy array
+        scaled synapse point (This one is not really necessary. TODO: remove this variable)
+    loc_mesh: trimesh_io.Mesh
+        local mesh
+    dist_to_center: float
+        Distance from synapse to the center of cellid's nucleus
+    sdf: list
+        List of sdf values for each face of loc_mesh
+    seg: list
+        List of segmentation labels for each face of loc_mesh
+    vertlabels: list
+        List of segmentation labels for each vertex of loc_mesh
+    allmeshes: trimesh_io.Mesh list 
+        List of all submeshes created by the segmentation
+    cellid: int
+        Cell id for which PSS is being extracted
+    Obj: dict
+        Processing Object
+    large_loc_mesh: trimesh_io.Mesh
+        Local mesh for which skeleton is extracted
+
+    Returns
+    -------
+    spinemesh: trimesh_io.Mesh
+        Computed PSS mesh
+    sk: skeleton.Skeleton
+        Skeleton in local mesh
+    '''
     time_start = time.time()
     csg = loc_mesh._create_csgraph()
     ccs = sparse.csgraph.connected_components(csg)
@@ -922,6 +1028,22 @@ def get_PSS_from_locmesh(pt,s,loc_mesh,dist_to_center,sdf,seg,vertlabels,allmesh
     return spinemesh,sk
 
 def insert_into_PSS_table(synid, pss_vector, cellid, credentials_path):
+    '''
+    Given the synapse id, pss 1024 vector, cellid and bigquery credentials path, insert the entry into the 
+    bigquery table.
+
+    Parameters
+    ----------
+    synid:  int
+        Synapse ID
+    pss_vector: float list
+        Vector with PSS feature values
+    cellid: int
+        Cell id
+    credentials_path: string
+        Bigquery credentials path
+    
+    '''
     #credentials_path = '/Users/sharmishtaas/Documents/code/testBigQuery/exalted-beanbag-334502-1a080bb80b37.json'
     os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
 
