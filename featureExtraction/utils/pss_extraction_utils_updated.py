@@ -60,7 +60,12 @@ from annotationframeworkclient import infoservice,FrameworkClient
 import tensorflow as tf
 from google.cloud import storage
 from caveclient import CAVEclient
-
+from featureExtraction.utils import pss_extraction_utils_updated, taskqueue_utils
+import psutil
+import pandas as pd
+import numpy  as np
+import concurrent.futures
+import datetime
 
 
 
@@ -1629,6 +1634,54 @@ def myprocessingTask(Obj,l,q):
     return obj
 
 @queueable
+def myprocessingTask_cellid_feature(config_file, cellid):
+    '''
+    Given a config file and cellid, query for all synapses for cellid (threshold of how to filter 
+    synapses is in the config file, ie: if we want only the first 60 microns), split the resulting 
+    dataframe into 15 splits, parallely process PSS extraction and save result in a pkl file 
+    using the cellid.
+    TODO: parametrize the split
+
+    Parameters
+    ----------
+    config_file: string
+        Name of config file (JSON)
+    cellid: int
+        ID of Cell of interest
+
+    '''
+    fname = '/usr/local/allen/programs/celltypes/workgroups/em-connectomics/analysis_group/forSharmi/psstestoutput/%d.pkl'%cellid    
+    
+    if not os.path.exists(fname):
+        logical    = False
+        df_results = []
+        num_procs  = psutil.cpu_count(logical=logical)
+        
+        if len(sys.argv) > 1:
+            num_procs = int(sys.argv[1])
+
+        Obj, big_dataframe = taskqueue_utils.create_proc_obj (config_file,cellid)
+        big_dataframe = big_dataframe
+        num_procs = 15
+        splitted_df = np.array_split(big_dataframe, num_procs)
+        start = time.time()
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_procs) as executor:
+            results = [ executor.submit(process_split_dataframe,df=df, Obj=Obj,cellid = cellid) for df in splitted_df ]
+            for result in concurrent.futures.as_completed(results):
+                try:
+                    df_results.append(result.result())
+                except Exception as ex:
+                    print(str(ex))
+                    pass
+        end = time.time()
+        print("-------------------------------------------")
+        print("PPID %s Completed in %s"%(os.getpid(), round(end-start,2)))
+        df_results = pd.concat(df_results)
+        df_results.to_pickle(fname)
+    else:
+        print("This file exists!")
+
+@queueable
 def myprocessingTask_synapseid(Obj,synapse_id,cellid):
     '''
         Given the processing object, synapse ID and cell id, extract the PSS and output the mesh into the 
@@ -1902,6 +1955,46 @@ def myevalfunc(Obj, ops,is_training, sess,fn):
         cf = CloudFiles(Obj['cloud_bucket'],secrets =secretstring)
 
         cf.put_json(outfile, content=np.squeeze(pred_val))
+
+def process_split_dataframe(df,Obj,cellid):
+    '''
+    Given a dataframe, extract the PSS, calculate the 1024 feature and create a dataframe 
+    with just the synapse ID and PSS feature
+
+    Parameters
+    ----------
+    df: pandas.DataFrame
+        Dataframe containing synapse information including Synapse ID and others queried from db
+    Obj: dict
+        Processing Object
+    cellid: int
+        ID of Cell of interest
+
+    Returns
+    -------
+    df1: pandas.DataFrame
+        Dataframe where each row has a synapse ID and corresponding PSS feature vector
+    '''
+
+    df1 = df[['id','post_pt_root_id']]
+
+    pid  = os.getpid()
+    ppid = os.getppid()
+    start = time.time()
+    print("PPID %s->%s Started"%(ppid,pid))
+
+    features = []
+    for synapseid in df1['id']:
+        try:
+            f = myprocessingTask_synapseid_feature(Obj,synapseid,cellid)
+        except:
+            f = []
+        features.append(f)
+    df1['PSSfeatures'] = features
+    
+    stop  = time.time()
+    completed_in  = round(stop - start,2)
+    return(df1)
 
 def reduce_features_spines(features):
     '''
