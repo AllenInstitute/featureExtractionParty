@@ -1354,9 +1354,9 @@ def log_string(Obj,out_str):
         String to be printed
     
     '''
-    Obj['LOG_FOUT'].write(out_str+'\n')
-    Obj['LOG_FOUT'].flush()
-    #print(out_str)
+    #Obj['LOG_FOUT'].write(out_str+'\n')
+    #Obj['LOG_FOUT'].flush()
+    print(out_str)
 
 def loadCloudH5File(Obj,filename,num_points):
     '''
@@ -1470,15 +1470,15 @@ def myParallelProcess(Obj):
         processing object containing configuration information
     
     '''
-     l = len(Obj['rng'])
-     from multiprocessing import Process
-     procs = []
-     for i in Obj['rng']:
+    l = len(Obj['rng'])
+    from multiprocessing import Process
+    procs = []
+    for i in Obj['rng']:
         proc = Process(target=myprocessingfunc, args=(Obj,l,i))
         proc.start()
         
-     # complete the processes
-     for proc in procs:
+    # complete the processes
+    for proc in procs:
         proc.join()
 
 def myprocessingfunc(Obj,l,q):
@@ -1650,19 +1650,17 @@ def myprocessingTask_cellid_feature(config_file, cellid):
         ID of Cell of interest
 
     '''
-    fname = '/usr/local/allen/programs/celltypes/workgroups/em-connectomics/analysis_group/forSharmi/psstestoutput/%d.pkl'%cellid    
+    Obj, big_dataframe = taskqueue_utils.create_proc_obj (config_file,cellid)
+    fname = '%s/%d.pkl'%(Obj['pss_dataframe_directory'], cellid)    
     
     if not os.path.exists(fname):
         logical    = False
         df_results = []
-        num_procs  = psutil.cpu_count(logical=logical)
         
-        if len(sys.argv) > 1:
-            num_procs = int(sys.argv[1])
-
-        Obj, big_dataframe = taskqueue_utils.create_proc_obj (config_file,cellid)
+        print("This is the size of big dataframe: ", big_dataframe.shape)
         big_dataframe = big_dataframe
-        num_procs = 15
+        print("This is the size of big dataframe: ", big_dataframe.shape)
+        num_procs = Obj['multiproc_n']
         splitted_df = np.array_split(big_dataframe, num_procs)
         start = time.time()
         with concurrent.futures.ProcessPoolExecutor(max_workers=num_procs) as executor:
@@ -1677,6 +1675,7 @@ def myprocessingTask_cellid_feature(config_file, cellid):
         print("-------------------------------------------")
         print("PPID %s Completed in %s"%(os.getpid(), round(end-start,2)))
         df_results = pd.concat(df_results)
+        print("This is the resulting dataframe shape! ", df_results.shape)
         df_results.to_pickle(fname)
     else:
         print("This file exists!")
@@ -1784,40 +1783,47 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
     '''
 
     print (synapse_id, "Now starting task" )
-    credentials_path = "/usr/local/featureExtractionParty/bigquery_credentials.json"
-    flag = check_if_entry_exists(synapse_id,credentials_path)
+    #credentials_path = "/usr/local/featureExtractionParty/bigquery_credentials.json"
+    #flag = check_if_entry_exists(synapse_id,credentials_path)
     
-    if not flag:
+    if 1==1:
+    #if not flag:
+        print("Debug 1")
         tf.reset_default_graph()
 
         Obj['tensorflow_model'] = importlib.import_module('models.model') # import network module
+        print("Debug 1.5")
+        print(Obj['pointnet_dump_dir'])
+        print("Debug 1.7")
+        #if not os.path.exists(Obj['pointnet_dump_dir']): 
+        #    os.mkdir(Obj['pointnet_dump_dir'])
+        print("Debug 2")
+        #Obj['LOG_FOUT'] = open(os.path.join(Obj['pointnet_dump_dir'], 'log_evaluate.txt'), 'w')
         
-        if not os.path.exists(Obj['pointnet_dump_dir']): 
-            os.mkdir(Obj['pointnet_dump_dir'])
-        
-        Obj['LOG_FOUT'] = open(os.path.join(Obj['pointnet_dump_dir'], 'log_evaluate.txt'), 'w')
-        
-        outputspinefile = Obj['outdir'] + "/PSS_%d.off"%(synapse_id)
-        outputlocmeshfile = Obj['outdir'] + "/locmeshPSS_%d.off"%(synapse_id)
-        
+        #outputspinefile = Obj['outdir'] + "/PSS_%d.off"%(synapse_id)
+        #outputlocmeshfile = Obj['outdir'] + "/locmeshPSS_%d.off"%(synapse_id)
+        print("Debug 3")
         spinemesh = None
         loc_mesh = None
         sk = None
         pt = None
         Obj['synapse_id'] = synapse_id
 
+        print("Debug 4")
+        #file_exists = tf.io.gfile.exists(Obj['cloud_bucket']+ '%s/PSS_%d.h5'%(Obj['type_of_shape'],synapse_id))
+        #otherexists = os.path.exists(Obj['google_secrets_file'])
         
-        file_exists = tf.io.gfile.exists(Obj['cloud_bucket']+ '%s/PSS_%d.h5'%(Obj['type_of_shape'],synapse_id))
-        otherexists = os.path.exists(Obj['google_secrets_file'])
-        
-        fname = Obj['cloud_bucket']+ '%s/PSS_%d.h5'%(Obj['type_of_shape'],synapse_id)
+        #fname = Obj['cloud_bucket']+ '%s/PSS_%d.h5'%(Obj['type_of_shape'],synapse_id)
         
         if 1==1:
         #if ((not file_exists) | (Obj['forcerun'] == True)):
-        
+            print("Debug 5")
             s, pt = get_synapse_and_scaled_versions_synapseid(Obj, synapse_id)
+            print("Debug 6")
             dist_to_center,Obj['mesh_bounds'] = get_distance_to_center(Obj,cellid,pt)  
+            print("Debug 7")
             allmeshes, vertlabels,loc_mesh,other_pt,sdf,seg,large_loc_mesh,postcellid = get_segments_for_synapse(Obj,s,cellid)
+            print("Debug 8")
             if allmeshes is not None:
                 
                 if dist_to_center < 0: #lone segment 
@@ -1827,7 +1833,7 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
                 else:
 
                     spinemesh,sk = get_PSS_from_locmesh(pt,s,loc_mesh,dist_to_center,sdf,seg,vertlabels,allmeshes,cellid,Obj,large_loc_mesh)
-                #save to cloud
+                
 
                 spinemesh.vertices = spinemesh.vertices - np.mean(large_loc_mesh.vertices,axis=0)
     
@@ -1877,8 +1883,8 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
                     pred_val = sess.run([ops['embedding']], feed_dict=feed_dict)
                     
 
-                    credentials_path = "/usr/local/featureExtractionParty/bigquery_credentials.json"
-                    insert_into_PSS_table(synapse_id, pred_val[0][0].tolist(),postcellid,credentials_path)
+                    #credentials_path = "/usr/local/featureExtractionParty/bigquery_credentials.json"
+                    #insert_into_PSS_table(synapse_id, pred_val[0][0].tolist(),postcellid,credentials_path)
                     
                 del(spinemesh)
                 del(allmeshes)
@@ -1890,9 +1896,11 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
     else:
         print("Record already exists")
 
+    return pred_val[0][0].tolist()
+
 def mySerialProcess(Obj):
 
-'''
+ '''
     Given the processing object extract the PSS for all synapses in the Object and output the meshes into the 
     google cloud bucket.
 
@@ -1901,7 +1909,7 @@ def mySerialProcess(Obj):
     Obj: dict
         Input configuration information read into the dict
             
-    '''
+ '''
  l = len(Obj['rng'])
  for i in Obj['rng']:
         #try:
