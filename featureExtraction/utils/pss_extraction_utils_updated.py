@@ -1658,7 +1658,7 @@ def myprocessingTask_cellid_feature(config_file, cellid):
         df_results = []
         
         print("This is the size of big dataframe: ", big_dataframe.shape)
-        big_dataframe = big_dataframe
+        
         print("This is the size of big dataframe: ", big_dataframe.shape)
         num_procs = Obj['multiproc_n']
         splitted_df = np.array_split(big_dataframe, num_procs)
