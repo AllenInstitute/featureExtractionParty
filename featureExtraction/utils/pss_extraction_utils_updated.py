@@ -1,6 +1,10 @@
 import google.cloud
-from google.cloud import bigquery
+#from google.cloud import bigquery
+from google.cloud import storage
 import tensorflow as tf
+from tensorflow import python as tf_python
+tf.get_logger().setLevel('INFO')
+
 import numpy as np
 import argparse
 import socket
@@ -66,8 +70,40 @@ import pandas as pd
 import numpy  as np
 import concurrent.futures
 import datetime
+import gc
+import gcsfs
+import signal
+from functools import wraps
+import time
+from func_timeout import func_timeout, FunctionTimedOut
+import time
+from wrapt_timeout_decorator import *
 
+def timeout1111(seconds, default=None):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            def signal_handler(signum, frame):
+                raise TimeoutError("Timed out!")
+            # Set up the signal handler for timeout
+            signal.signal(signal.SIGALRM, signal_handler)
 
+            # Set the initial alarm for the integer part of seconds
+            signal.setitimer(signal.ITIMER_REAL, seconds)
+
+            
+            try:
+                result = func(*args, **kwargs)
+            except TimeoutError:
+                return default
+            finally:
+                signal.alarm(0)
+            
+            return result
+        
+        return wrapper
+    
+    return decorator
 
 def assign_labels_to_verts(mesh,labels):
     '''
@@ -304,7 +340,7 @@ def eval_one_epoch(Obj, sess, ops, num_votes=1, topk=1):
         outfile = Obj['pointnet_files'][fn].replace(".h5","_ae_model_manualV3.txt")
         if (not os.path.exists(outfile)) | (Obj['forcecreatefeatures'] == True):
         #if 1 ==1:
-            log_string(Obj,'----'+str(fn)+'----')
+            #log_string(Obj,'----'+str(fn)+'----')
             #print(Obj['pointnet_files'][fn])
             current_data, current_label = provider.loadAllOffDataFile(Obj['pointnet_files'][fn], Obj['pointnet_num_points'])
             #current_data,current_label = loadCloudH5File(Obj,Obj['pointnet_files'][fn], Obj['pointnet_num_points'])
@@ -347,12 +383,12 @@ def evaluate(Obj, num_votes=1):
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     config.allow_soft_placement = True
-    config.log_device_placement = True
+    config.log_device_placement = False
     sess = tf.Session(config=config)
 
     # Restore variables from disk.
     saver.restore(sess, Obj['pointnet_model_path'])
-    log_string(Obj,"Model restored.")
+    #log_string(Obj,"Model restored.")
 
     ops = {'pointclouds_pl': pointclouds_pl,
            'labels_pl': labels_pl_rep,
@@ -397,12 +433,12 @@ def evaluate_cloud(Obj, num_votes=1):
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
     config.allow_soft_placement = True
-    config.log_device_placement = True
+    config.log_device_placement = False
     sess = tf.Session(config=config)
 
     # Restore variables from disk.
     saver.restore(sess, Obj['pointnet_model_path'])
-    log_string(Obj,"Model restored.")
+    #log_string(Obj,"Model restored.")
 
     ops = {'pointclouds_pl': pointclouds_pl,
            'labels_pl': labels_pl_rep,
@@ -439,7 +475,7 @@ def eval_one_epoch_cloud(Obj, sess, ops, num_votes=1, topk=1):
         
         #if (not os.path.exists(outfile)) | (Obj['forcecreatefeatures'] == True):
         if 1 ==1:
-            log_string(Obj,'----'+str(fn)+'----')
+            #log_string(Obj,'----'+str(fn)+'----')
             #print(Obj['pointnet_files'][fn])
             
             current_data,current_label = loadCloudH5File(Obj,Obj['pointnet_files'][fn], Obj['pointnet_num_points'])
@@ -557,6 +593,7 @@ def find_closest_component(loc_mesh, x,y,z):
 
     print(x,y,z)
     print(np.mean(loc_mesh.vertices,axis=1))    
+    print("Got the mean of all loc mesh in find closest component")
     allmeshes = trimesh.graph.split(loc_mesh,only_watertight=False)
     dist=None
     besta = None
@@ -778,7 +815,14 @@ def get_local_mesh_imagery(Obj,synapse_loc):
     trimesh.smoothing.filter_laplacian(M, lamb=0.9, iterations=3, implicit_time_integration=False, volume_constraint=True, laplacian_operator=None)
 
     return M
-   
+
+@timeout(10)  
+def get_seg (sdf, loc_mesh, Obj):
+    print("Now doing seg")
+    return cfm.cgal_segmentation(loc_mesh.vertices,loc_mesh.faces, np.asarray(sdf), Obj['cgal_number_of_clusters'], Obj['cgal_smoothing_lambda'])
+                
+
+
 def get_segments_for_synapse(Obj, synapse_loc,cellid):
     '''
     Given a processing object, synapse location and cellid, find the local mesh, segment it and return a list of
@@ -823,8 +867,9 @@ def get_segments_for_synapse(Obj, synapse_loc,cellid):
 
 
     ##VERY IMPORTANT - MAKE SURE You ARE EXTRAcTING ON DENDRITE - find post synaptic cellid 
-    client = FrameworkClient(Obj['dataset_name'],auth_token_file=Obj['auth_token_file'])
-    table = client.materialize.query_table('synapses_pni_2',filter_in_dict={'id':['%d'%synapse_id]}, materialization_version = Obj['materialization_version'])
+    #client = FrameworkClient(Obj['dataset_name'],auth_token_file=Obj['auth_token_file'])
+    #table = client.materialize.query_table('synapses_pni_2',filter_in_dict={'id':['%d'%synapse_id]}, materialization_version = Obj['materialization_version'])
+    table = Obj['datarow']
     print(type(table))
     print(table.post_pt_root_id.values[0])
     postcellid = table.post_pt_root_id.values[0]
@@ -867,7 +912,7 @@ def get_segments_for_synapse(Obj, synapse_loc,cellid):
     #loc_mesh.vertices = loc_mesh.vertices - np.mean(large_loc_mesh.vertices,axis=0)
     #large_loc_mesh.vertices = large_loc_mesh.vertices - np.mean(large_loc_mesh.vertices,axis=0)
     
-        
+    print("Now starting the cgal stuff")
 
     #loc_mesh = get_local_mesh(Obj,np.array(synapse_loc),cellid)
     
@@ -880,9 +925,18 @@ def get_segments_for_synapse(Obj, synapse_loc,cellid):
     else:
         if (len(loc_mesh.vertices) > 50) & (len(loc_mesh.vertices) < 100000) :
             sdf = cfm.cgal_sdf(loc_mesh.vertices,loc_mesh.faces, Obj['cgal_number_of_rays'],Obj['cgal_cone_angle'])
-            seg = cfm.cgal_segmentation(loc_mesh.vertices,loc_mesh.faces, np.asarray(sdf), Obj['cgal_number_of_clusters'], Obj['cgal_smoothing_lambda'])
-            vertlabels = assign_labels_to_verts(loc_mesh,seg)    
-            allmeshes = create_submeshes(loc_mesh,seg)
+            print(type(sdf))
+            print("This is sdf stats: ", np.mean(np.array(sdf)), np.std(np.array(sdf)))
+            if (np.mean(np.array(sdf)) > 1) | (np.std(np.array(sdf)) < 0.00001):
+                seg = None
+                allmeshes = None
+                vertlabels = None
+            else:
+                seg = cfm.cgal_segmentation(loc_mesh.vertices,loc_mesh.faces, np.asarray(sdf), Obj['cgal_number_of_clusters'], Obj['cgal_smoothing_lambda'])
+                vertlabels = assign_labels_to_verts(loc_mesh,seg)    
+                allmeshes = create_submeshes(loc_mesh,seg)
+            
+                
         else:
             allmeshes=None
             vertlabels = None
@@ -1091,10 +1145,11 @@ def get_synapse_and_scaled_versions_synapseid(Obj, synapse_id):
     
     '''
     sc = Obj['synapse_scale']
-    client = FrameworkClient(Obj['dataset_name'],auth_token_file=Obj['auth_token_file'])
+    #client = FrameworkClient(Obj['dataset_name'],auth_token_file=Obj['auth_token_file'])
     
-    data_synapses= client.materialize.query_table('synapses_pni_2',filter_in_dict={'id':['%d'%synapse_id]}, materialization_version = Obj['materialization_version'])
+    #data_synapses= client.materialize.query_table('synapses_pni_2',filter_in_dict={'id':['%d'%synapse_id]}, materialization_version = Obj['materialization_version'])
     
+    data_synapses = Obj['datarow']
     s = [sc[0]*data_synapses.iloc[0]['ctr_pt_position'][0], sc[1]*data_synapses.iloc[0]['ctr_pt_position'][1], sc[2]*data_synapses.iloc[0]['ctr_pt_position'][2]]
     s_scaled = np.array(s)/[2,2,1]
     s_nm = (s_scaled)*[8,8,40] 
@@ -1130,8 +1185,8 @@ def get_distance_to_center(Obj,cellid,s_nm):
     if Obj['cell_center_of_mass'] is None:
         
         try:
-            client = FrameworkClient(Obj['dataset_name'],auth_token_file=Obj['auth_token_file'])
-            Obj['cell_center_of_mass'] =client.materialize.query_table('nucleus_detection_v0',filter_in_dict={'pt_root_id':['%d'%cellid]}, materialization_version = Obj['materialization_version'])['pt_position'].values[0]
+            #client = FrameworkClient(Obj['dataset_name'],auth_token_file=Obj['auth_token_file'])
+            #Obj['cell_center_of_mass'] =client.materialize.query_table('nucleus_detection_v0',filter_in_dict={'pt_root_id':['%d'%cellid]}, materialization_version = Obj['materialization_version'])['pt_position'].values[0]
             
             center = Obj['cell_center_of_mass']*[4,4,40]
             
@@ -1514,7 +1569,19 @@ def myprocessingfunc(Obj,l,q):
         
         s, pt = get_synapse_and_scaled_versions(Obj, q)
         cellid = Obj['data_synapses'].iloc[q]['post_pt_root_id']   
-        dist_to_center,Obj['mesh_bounds'] = get_distance_to_center(Obj,cellid,pt)  
+        dist_to_center,Obj['mesh_bounds'] = get_distance_to_center(Obj,cellid,pt) 
+
+        '''try:
+            #allmeshes, vertlabels,loc_mesh,other_pt,sdf,seg = get_segments_for_synapse(Obj,s,cellid)
+            allmeshes, vertlabels,loc_mesh,other_pt,sdf,seg = func_timeout(10, get_segments_for_synapse, args=(Obj, s, cellid))
+        except FunctionTimedOut:
+            print ( "doit('arg1', 'arg2') could not complete within 5 seconds and was terminated.\n")
+            allmeshes = None
+        except Exception as e:
+            allmeshes = None
+	    '''
+        # Handle any exceptions that doit might raise here
+ 
         allmeshes, vertlabels,loc_mesh,other_pt,sdf,seg = get_segments_for_synapse(Obj,s,cellid)
         
         if allmeshes is not None:
@@ -1650,35 +1717,87 @@ def myprocessingTask_cellid_feature(config_file, cellid):
         ID of Cell of interest
 
     '''
+    #one call to synapse database
     Obj, big_dataframe = taskqueue_utils.create_proc_obj (config_file,cellid)
-    fname = '%s/%d.pkl'%(Obj['pss_dataframe_directory'], cellid)    
+    #big_dataframe = big_dataframe[:40]
+    fname = '%s/%d.pkl'%(Obj['pss_dataframe_directory'], cellid)  
+    Obj['dataframeshape'] =   big_dataframe.shape[0]
+
+    print ("This is the shape of big dataframe: ", big_dataframe.shape)
+
+    big_dataframe = update_synapses(big_dataframe,Obj['cell_center_of_mass'],70000)
+    print ("This is the shape of big dataframe: ", big_dataframe.shape)
+    #if big_dataframe.shape[0] < 10000:
+    #if 1==1:
+
     
-    if not os.path.exists(fname):
-        logical    = False
-        df_results = []
-        
-        print("This is the size of big dataframe: ", big_dataframe.shape)
-        
-        print("This is the size of big dataframe: ", big_dataframe.shape)
-        num_procs = Obj['multiproc_n']
-        splitted_df = np.array_split(big_dataframe, num_procs)
-        start = time.time()
-        with concurrent.futures.ProcessPoolExecutor(max_workers=num_procs) as executor:
-            results = [ executor.submit(process_split_dataframe,df=df, Obj=Obj,cellid = cellid) for df in splitted_df ]
-            for result in concurrent.futures.as_completed(results):
-                try:
-                    df_results.append(result.result())
-                except Exception as ex:
-                    print(str(ex))
-                    pass
-        end = time.time()
-        print("-------------------------------------------")
-        print("PPID %s Completed in %s"%(os.getpid(), round(end-start,2)))
-        df_results = pd.concat(df_results)
-        print("This is the resulting dataframe shape! ", df_results.shape)
-        df_results.to_pickle(fname)
+
+    name = 'PSS/pickle_files_661/%d.pkl'%cellid   
+    storage_client = storage.Client()
+    bucket_name = 'allen-minnie-phase3'  # Do not put 'gs://my_bucket_name'
+    bucket = storage_client.bucket(bucket_name)
+    stats = storage.Blob(bucket=bucket, name=name).exists(storage_client)
+
+
+    if not stats: #stats is True if file exists
+        if 1==1:
+            logical    = False
+            df_results = []
+            
+            print("This is the size of big dataframe: ", big_dataframe.shape)
+            big_dataframe = big_dataframe
+            
+
+            print("This is the size of big dataframe: ", big_dataframe.shape)
+            num_procs = Obj['multiproc_n']
+            splitted_df = np.array_split(big_dataframe, num_procs)
+            start = time.time()
+            with concurrent.futures.ProcessPoolExecutor(max_workers=num_procs) as executor:
+                results = [ executor.submit(process_split_dataframe,df=df, Obj=Obj,cellid = cellid) for df in splitted_df ]
+                for result in concurrent.futures.as_completed(results):
+                    try:
+                        df_results.append(result.result())
+                    except Exception as ex:
+                        print(str(ex))
+                        pass
+            end = time.time()
+            print("-------------------------------------------")
+            print("PPID %s Completed in %s"%(os.getpid(), round(end-start,2)))
+            df_results = pd.concat(df_results)
+            print("This is the resulting dataframe shape! ", df_results.shape)
+            #df_results.to_pickle(fname)
+            #######
+
+            
+
+            fs = gcsfs.GCSFileSystem(project='em-270621', token = 'credentials.json')
+            #with fs.open('/allen-minnie-phase3/PSS/pickle_files_661/%d.pkl'%cellid,'wb') as f:
+            with fs.open('%s/%d.pkl'%(Obj['PSS_cloud_bucket'],cellid),'wb') as f:
+                df_results.to_pickle(f)
+
+            
+
+            
+            ##########
+            #os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = credentials_path
+            #outputbucket = "gs://allen-minnie-phase3/PSS/test/test.pkl"
+            #with tf_python.lib.io.file_io.FileIO (outputbucket, mode='w') as f:
+            #    df_results.to_pickle(f)
+            #------------
+            ##path_to_private_key = Obj['google_secrets_file']
+            ##client = storage.Client.from_service_account_json(json_credentials_path=path_to_private_key)
+
+            ### The bucket on GCS in which to write the CSV file
+            ##bucket = client.bucket('allen-minnie-phase3/PSS')
+            ### The name assigned to the CSV file on GCS
+            ##blob = bucket.blob('mytest_data.csv')
+            ##blob.upload_from_string(df_results.to_csv(), 'text/csv')
+
+            
+        else:
+            print("This file exists!")
     else:
-        print("This file exists!")
+        print("Too many synapses ", big_dataframe.shape)
 
 @queueable
 def myprocessingTask_synapseid(Obj,synapse_id,cellid):
@@ -1782,34 +1901,34 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
              
     '''
 
-    print (synapse_id, "Now starting task" )
+    print (synapse_id, "Now starting task", Obj['partialindex'], Obj['dataframeshape'] )
     #credentials_path = "/usr/local/featureExtractionParty/bigquery_credentials.json"
     #flag = check_if_entry_exists(synapse_id,credentials_path)
     
     if 1==1:
     #if not flag:
-        print("Debug 1")
+        
         tf.reset_default_graph()
 
-        Obj['tensorflow_model'] = importlib.import_module('models.model') # import network module
-        print("Debug 1.5")
+        #Obj['tensorflow_model'] = importlib.import_module('models.model') # import network module
+        
         print(Obj['pointnet_dump_dir'])
-        print("Debug 1.7")
+        
         #if not os.path.exists(Obj['pointnet_dump_dir']): 
         #    os.mkdir(Obj['pointnet_dump_dir'])
-        print("Debug 2")
+        
         #Obj['LOG_FOUT'] = open(os.path.join(Obj['pointnet_dump_dir'], 'log_evaluate.txt'), 'w')
         
         #outputspinefile = Obj['outdir'] + "/PSS_%d.off"%(synapse_id)
         #outputlocmeshfile = Obj['outdir'] + "/locmeshPSS_%d.off"%(synapse_id)
-        print("Debug 3")
+        
         spinemesh = None
         loc_mesh = None
         sk = None
         pt = None
         Obj['synapse_id'] = synapse_id
 
-        print("Debug 4")
+        
         #file_exists = tf.io.gfile.exists(Obj['cloud_bucket']+ '%s/PSS_%d.h5'%(Obj['type_of_shape'],synapse_id))
         #otherexists = os.path.exists(Obj['google_secrets_file'])
         
@@ -1817,13 +1936,24 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
         
         if 1==1:
         #if ((not file_exists) | (Obj['forcerun'] == True)):
-            print("Debug 5")
+            
             s, pt = get_synapse_and_scaled_versions_synapseid(Obj, synapse_id)
-            print("Debug 6")
+            
             dist_to_center,Obj['mesh_bounds'] = get_distance_to_center(Obj,cellid,pt)  
-            print("Debug 7")
+            
+            '''try:
+                print("Trying function TEST")
+                allmeshes, vertlabels,loc_mesh,other_pt,sdf,seg = func_timeout(10, get_segments_for_synapse, args=(Obj, s, cellid))
+            except FunctionTimedOut:
+                print ( "doit('arg1', 'arg2') could not complete within 10 seconds and was terminated.\n")
+                allmeshes = None
+            except Exception as e:
+                allmeshes = None
+                '''
+        
             allmeshes, vertlabels,loc_mesh,other_pt,sdf,seg,large_loc_mesh,postcellid = get_segments_for_synapse(Obj,s,cellid)
-            print("Debug 8")
+            
+
             if allmeshes is not None:
                 
                 if dist_to_center < 0: #lone segment 
@@ -1856,7 +1986,7 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
                 config = tf.ConfigProto()
                 config.gpu_options.allow_growth = True
                 config.allow_soft_placement = True
-                config.log_device_placement = True
+                config.log_device_placement = False
                 sess = tf.Session(config=config)
                 
                 # Restore variables from disk.
@@ -1886,13 +2016,19 @@ def myprocessingTask_synapseid_feature(Obj,synapse_id,cellid):
                     #credentials_path = "/usr/local/featureExtractionParty/bigquery_credentials.json"
                     #insert_into_PSS_table(synapse_id, pred_val[0][0].tolist(),postcellid,credentials_path)
                     
+                del(vertlabels)
+                del(large_loc_mesh)
                 del(spinemesh)
                 del(allmeshes)
                 del(loc_mesh)
                 del(sdf)
                 del(seg)
                 del(sk)
+                del (current_data)
+                del(current_label)
+                gc.collect()
         del(Obj)
+        gc.collect()
     else:
         print("Record already exists")
 
@@ -1941,7 +2077,7 @@ def myevalfunc(Obj, ops,is_training, sess,fn):
     
     '''
 
-    log_string(Obj,'----'+str(fn)+'----')
+    #log_string(Obj,'----'+str(fn)+'----')
 
     
     outfile = Obj['pointnet_files'][fn].replace(".h5","_ae_model_manualV3.json")
@@ -1984,6 +2120,9 @@ def process_split_dataframe(df,Obj,cellid):
         Dataframe where each row has a synapse ID and corresponding PSS feature vector
     '''
 
+    client = FrameworkClient(Obj['dataset_name'],auth_token_file=Obj['auth_token_file'])
+    Obj['cell_center_of_mass'] =client.materialize.query_table('nucleus_detection_v0',filter_in_dict={'pt_root_id':['%d'%cellid]}, materialization_version = Obj['materialization_version'])['pt_position'].values[0]
+            
     df1 = df[['id','post_pt_root_id']]
 
     pid  = os.getpid()
@@ -1992,12 +2131,18 @@ def process_split_dataframe(df,Obj,cellid):
     print("PPID %s->%s Started"%(ppid,pid))
 
     features = []
+    index = 0
+    Obj['tensorflow_model'] = importlib.import_module('models.model') # import network module
+        
     for synapseid in df1['id']:
         try:
+            Obj['datarow'] = df[df['id']==synapseid]
+            Obj['partialindex'] = '%d_out_of_%d'%(index,df1.shape[0])
             f = myprocessingTask_synapseid_feature(Obj,synapseid,cellid)
         except:
             f = []
         features.append(f)
+        index+=1
     df1['PSSfeatures'] = features
     
     stop  = time.time()
@@ -2131,6 +2276,9 @@ def save_submeshes(submeshes,inds):
 
     for i,ind in enumerate(inds):
         trimesh.exchange.export.export_mesh(submeshes[ind][0], "debug/pathspine_%d_%d.off"%(ind,i)) 
+
+
+
 
 def update_synapses(data_synapses,cell_center_of_mass,threshold):
     '''
