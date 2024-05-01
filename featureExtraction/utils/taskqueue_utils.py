@@ -84,12 +84,13 @@ def create_feature_obj(config_file,cell_id):
     return cfg, data_synapses
 
 def create_proc_obj (config_file,cell_id):
+    print("This is cell id: ", cell_id)
        
     with open(config_file) as f:
       procObj = json.load(f)
 
     #framework client for database and cv connection for mesh downloads
-    print ("setting up cave client")
+    print ("setting up cave client", procObj['auth_token_file'])
     client = CAVEclient(procObj['dataset_name'],auth_token_file=procObj['auth_token_file'])
     tokenfile = procObj['auth_token_file']
     with open(tokenfile) as f:
@@ -110,6 +111,7 @@ def create_proc_obj (config_file,cell_id):
     procObj['d_mesh'] = None
     procObj['sk'] = None
     print("About do do postsynaptic")
+    print("This is type of shape: ", procObj["type_of_shape"])
 
     if procObj["type_of_shape"] == "postsynaptic":
         data_synapses= client.materialize.query_table('synapses_pni_2',filter_in_dict={'post_pt_root_id':['%d'%cell_id]}, materialization_version = procObj['materialization_version'])
@@ -125,6 +127,9 @@ def create_proc_obj (config_file,cell_id):
     print (cell_id)
     procObj['nucleus_id'] =np.array(client.materialize.query_table('nucleus_detection_v0',filter_in_dict={'pt_root_id':['%d'%cell_id]}, materialization_version = procObj['materialization_version'])['id'].values[0])
     print("Next one")
+
+    
+    
     #procObj['synapse_ids'] = data_synapses.id
     
     # which synapses to process
