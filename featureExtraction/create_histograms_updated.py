@@ -141,16 +141,6 @@ def create_dataframes_from_cloud(config_file,cell_id_list = None):
 def create_dataframes(config_file,cell_id_list = None):
     with open(config_file) as f:
       cfg = json.load(f)
-    
-    
-    #INITS
-    cfg['client'] = FrameworkClient(cfg['dataset_name'],auth_token_file=cfg['auth_token_file'])
-    #cfg['dl'] = AnalysisDataLink(dataset_name=cfg['dataset_name'],
-    #                     sqlalchemy_database_uri=cfg['sqlalchemy_database_uri'],
-    #                     materialization_version=cfg['data_version'],
-    #                     verbose=False)
-    #cfg['neuron_df'] = pd.read_pickle(cfg['input_cell_db'])
-    #cfg['neuron_df'] = cfg['client'].materialize.query_table('allen_v1_column_types_v2', filter_in_dict={'pt_root_id':[864691136672628359]})
 
     
     cfg['reducer'] = joblib.load(open(cfg['pss_2d_umap_reducer_file'], 'rb'))
