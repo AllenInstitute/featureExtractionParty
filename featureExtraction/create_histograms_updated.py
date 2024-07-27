@@ -141,6 +141,7 @@ def create_dataframes_from_cloud(config_file,cell_id_list = None):
 def create_dataframes(config_file,cell_id_list = None):
     with open(config_file) as f:
       cfg = json.load(f)
+
     
     
     #INITS
@@ -151,6 +152,7 @@ def create_dataframes(config_file,cell_id_list = None):
     #                     verbose=False)
     #cfg['neuron_df'] = pd.read_pickle(cfg['input_cell_db'])
     #cfg['neuron_df'] = cfg['client'].materialize.query_table('allen_v1_column_types_v2', filter_in_dict={'pt_root_id':[864691136672628359]})
+
 
     
     cfg['reducer'] = joblib.load(open(cfg['pss_2d_umap_reducer_file'], 'rb'))
@@ -210,4 +212,4 @@ def createfeatures(Obj, cell_id):
     pss_extraction_utils_updated.featureExtractionTask_cell(Obj,cell_id,ds) 
     
     create_dataframes_from_cloud(Obj,[cell_id])
-    
+
