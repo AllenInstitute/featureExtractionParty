@@ -143,6 +143,18 @@ def create_dataframes(config_file,cell_id_list = None):
       cfg = json.load(f)
 
     
+    
+    #INITS
+    cfg['client'] = FrameworkClient(cfg['dataset_name'],auth_token_file=cfg['auth_token_file'])
+    #cfg['dl'] = AnalysisDataLink(dataset_name=cfg['dataset_name'],
+    #                     sqlalchemy_database_uri=cfg['sqlalchemy_database_uri'],
+    #                     materialization_version=cfg['data_version'],
+    #                     verbose=False)
+    #cfg['neuron_df'] = pd.read_pickle(cfg['input_cell_db'])
+    #cfg['neuron_df'] = cfg['client'].materialize.query_table('allen_v1_column_types_v2', filter_in_dict={'pt_root_id':[864691136672628359]})
+
+
+    
     cfg['reducer'] = joblib.load(open(cfg['pss_2d_umap_reducer_file'], 'rb'))
     
     if cell_id_list == None:
@@ -200,4 +212,4 @@ def createfeatures(Obj, cell_id):
     pss_extraction_utils_updated.featureExtractionTask_cell(Obj,cell_id,ds) 
     
     create_dataframes_from_cloud(Obj,[cell_id])
-    
+
